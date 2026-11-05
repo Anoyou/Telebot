@@ -269,7 +269,7 @@ private struct AIOverviewSection: View {
             NavigationLink {
                 AIGlobalSettingsView(workspace: workspace)
             } label: {
-                AINavigationRow(title: "AI 全局设置", detail: "总开关、聊天上下文条数、每个账号的调用预算", symbol: "slider.horizontal.3")
+                AINavigationRow(title: "AI 全局设置", detail: "总开关、回复排版与发送、聊天上下文和调用预算", symbol: "slider.horizontal.3")
             }
             .accessibilityIdentifier("ai.settings.global")
             NavigationLink {
@@ -447,6 +447,14 @@ struct AIGlobalSettingsView: View {
             if let loadError { Section { NoticeView(title: "设置读取失败", message: loadError) } }
             if original != nil {
                 switchSection
+                Section {
+                    NavigationLink {
+                        AIReplySettingsView(workspace: workspace)
+                    } label: {
+                        AINavigationRow(title: "回复排版与发送", detail: "谁来发、分割线、@Bot inline 提问", symbol: "text.bubble")
+                    }
+                    .accessibilityIdentifier("ai.settings.reply")
+                }
                 contextSection
                 budgetSection
                 retentionSection
@@ -530,7 +538,7 @@ struct AIGlobalSettingsView: View {
         } header: {
             Text("模型路由与回复格式在哪里设置？")
         } footer: {
-            Text("“路由”是指一条 AI 指令把问题交给哪个模型：可以固定使用一个模型，也可以开启“自动路由”让系统按问题类型挑选，并设置失败时改用的备用模型。回复格式（富文本、Markdown、纯文本）和发送方式同样在每条指令里单独设置。")
+            Text("“路由”是指一条 AI 指令把问题交给哪个模型：可以固定使用一个模型，也可以开启“自动路由”让系统按问题类型挑选，并设置失败时改用的备用模型。每条指令自己的回复模板和模型参数也在这里配置；通用回复方式、分割线和 inline 提问开关请打开上方“回复排版与发送”。")
         }
     }
 
@@ -606,6 +614,232 @@ struct AIGlobalSettingsView: View {
         } catch {
             saveError = error.localizedDescription
             uncertain = (error as? APIError)?.isOutcomeUncertain == true
+        }
+    }
+}
+
+// MARK: - AI 回复排版与发送（0.38.0，与 Web 的同名设置页共用服务器参数）
+
+struct AIReplySettingsView: View {
+    var workspace: AIWorkspaceStore? = nil
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var original: AIReplySettingsDraft?
+    @State private var draft = AIReplySettingsDraft()
+    @State private var loading = false
+    @State private var saving = false
+    @State private var loadError: String?
+    @State private var saveError: String?
+    @State private var uncertain = false
+    @State private var pendingKeys: Set<String> = []
+    @State private var saved = false
+    @State private var confirmingSave = false
+    @State private var confirmingReload = false
+    @State private var confirmingLeave = false
+
+    private var patch: [String: JSONValue] { original.map { draft.patch(from: $0) } ?? [:] }
+    private var dirty: Bool { !patch.isEmpty }
+    private var busy: Bool { loading || saving || uncertain }
+    private var protectsBack: Bool { dirty || saving || uncertain }
+
+    var body: some View {
+        Form {
+            if loading && original == nil { Section { ProgressView("正在读取回复设置…") } }
+            if let loadError {
+                Section {
+                    NoticeView(title: "回复设置读取失败", message: loadError)
+                    Button("重新读取", systemImage: "arrow.clockwise") { Task { await load() } }
+                        .disabled(loading || saving)
+                }
+            }
+            if let original {
+                Section {
+                    Text("AI 的回答由谁发、怎么排版。设置作用于这台服务器的所有账号，保存后对新的回答生效，不需要重启。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if original.supportedKeys.count < AIReplySettingsDraft.keys.count {
+                        Label("部分选项需要更新服务器。未提供的选项保持只读，不会写入默认值。", systemImage: "info.circle")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+                sendSection
+                layoutSection
+                inlineSection
+                saveSection
+            }
+        }
+        .navigationTitle("回复排版与发送").navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(protectsBack)
+        .toolbar {
+            if protectsBack {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("返回", systemImage: "chevron.backward") { confirmingLeave = true }
+                        .disabled(saving)
+                        .confirmationDialog(uncertain ? "保存结果还未确认" : "放弃未保存的修改？", isPresented: $confirmingLeave, titleVisibility: .visible) {
+                            Button(uncertain ? "离开页面" : "放弃修改并返回", role: .destructive) { dismiss() }
+                            Button("取消", role: .cancel) {}
+                        } message: {
+                            Text(uncertain ? "服务器可能已经保存。离开不会撤销已提交的设置，之后请重新读取核对。" : "本页尚未保存的修改会丢失，服务器上的设置不变。")
+                        }
+                }
+            }
+        }
+        .task { if original == nil { await load() } }
+        .refreshable {
+            if dirty && !uncertain { confirmingReload = true }
+            else { await load() }
+        }
+        .confirmationDialog("重新读取会放弃本页草稿", isPresented: $confirmingReload, titleVisibility: .visible) {
+            Button("放弃草稿并重新读取", role: .destructive) { Task { await load() } }
+            Button("取消", role: .cancel) {}
+        }
+        .onChange(of: draft) { saved = false }
+    }
+
+    private var sendSection: some View {
+        Section {
+            Picker(selection: $draft.replyStyle) {
+                Text("普通（把你的指令消息改成回答）").tag("normal")
+                Text("在原消息上编辑（富文本，需 Premium）").tag("edit_rich")
+                Text("inline 代发（交互 Bot 富文本）").tag("inline")
+                if !["normal", "edit_rich", "inline"].contains(draft.replyStyle) {
+                    Text("服务器当前方式：\(draft.replyStyle)").tag(draft.replyStyle)
+                }
+            } label: {
+                AISettingLabel(title: "你发 AI 指令时的回复方式", detail: "普通与原消息编辑都修改你自己的指令；inline 代发会出现“你 via @Bot”的消息")
+            }
+            .disabled(busy || !supports("ai_reply_style"))
+            .accessibilityIdentifier("ai.reply.style")
+            replyToggle("ai_inline_delete_command", title: "inline 代发后删除指令消息", detail: "只对 inline 代发有效：开启后聊天里只留答案；关闭则保留指令，答案回复在它下面。", value: $draft.deleteCommand, extraDisabled: draft.replyStyle != "inline")
+            replyToggle("ai_plugin_reply_via_bot", title: "Bot 在群里时由 Bot 回复", detail: "AI 答疑插件被关键词或 @Bot 触发时，包括你自己触发，交互 Bot 就在群里就由 Bot 直接回复；不在群里才尝试借你的账号代发。关闭则保留原来的 inline 代发行为。", value: $draft.preferBot)
+            replyToggle("ai_stream_edit", title: "边写边显示（分段流式）", detail: "普通或原消息编辑时，每写好一段先显示，末尾标“生成中”，完成后整理排版。群里约 3 秒、私聊约 2 秒更新一次，默认关闭。", value: $draft.streamEdit)
+        } header: {
+            Text("谁来发")
+        } footer: {
+            Text("原消息富文本需要 Premium，否则自动用普通格式。inline 代发需在 @BotFather 开启 /setinline 和 /setinlinefeedback，不可用时自动回退普通格式。Bot 是否能收到消息仍受群聊权限限制。")
+        }
+    }
+
+    private var layoutSection: some View {
+        Section {
+            replyToggle("ai_layout_divider_before", title: "问题和回答之间加分割线", detail: "回答上方有引用的问题或被回复的消息时，在引用下面加线再接回答；模板里已有线就不重复。", value: $draft.dividerBefore)
+            replyToggle("ai_layout_divider_after", title: "回答和署名之间加分割线", detail: "回答下面有署名、模型名或来源时，中间加线，署名单独一行。", value: $draft.dividerAfter)
+            replyToggle("ai_native_divider", title: "用 Telegram 自带的细分割线", detail: "富文本回答使用原生细横线；关闭则用一整行“━━━”。普通格式始终使用整行“━”。", value: $draft.nativeDivider)
+        } header: {
+            Text("排版")
+        } footer: {
+            Text("默认顺序：问题引用 → 分割线 → 回答 → 分割线 → 署名。问题和署名的内容由指令或插件模板提供，这里控制已有内容之间的分割线。")
+        }
+    }
+
+    private var inlineSection: some View {
+        Section {
+            replyToggle("ai_inline_ask_enabled", title: "响应“@Bot 问题”提问", detail: "交互 Bot 开启 inline 后，输入“@交互Bot 问题”会弹出“发送这个问题”，点选后 AI 把回答写进这条消息；关闭则不弹出。", value: $draft.inlineAsk)
+            replyToggle("ai_inline_ask_show_question", title: "回答顶部显示问题", detail: "inline 提问的回答顶部用引用块显示原问题；关闭后只显示回答。", value: $draft.showQuestion)
+        } header: {
+            Text("@Bot inline 提问")
+        }
+    }
+
+    private var saveSection: some View {
+        Section {
+            Button {
+                confirmingSave = true
+            } label: {
+                HStack {
+                    if saving { ProgressView() }
+                    Label(saving ? "正在保存…" : "保存修改", systemImage: "checkmark.circle")
+                }
+                .frame(minHeight: 44)
+            }
+            .disabled(!dirty || busy)
+            .accessibilityIdentifier("ai.reply.save")
+            .confirmationDialog("保存回复排版与发送设置？", isPresented: $confirmingSave, titleVisibility: .visible) {
+                Button("保存 \(patch.count) 项修改") { Task { await save() } }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("这些设置影响该服务器的所有账号，对新的回答生效。开启 inline 代发后删除指令，会删除之后相应的指令消息；不会重新发送或修改历史回答。")
+            }
+            if let original, dirty && !busy {
+                Button("放弃本页修改", systemImage: "arrow.uturn.backward", role: .destructive) {
+                    draft = original
+                    saveError = nil
+                }
+            }
+            if let saveError {
+                NoticeView(title: uncertain ? "保存结果待确认" : "保存失败", message: saveError)
+            }
+            if uncertain {
+                Button("读取服务器设置确认", systemImage: "arrow.clockwise") { Task { await load() } }
+                    .disabled(loading || saving)
+                    .accessibilityIdentifier("ai.reply.confirmState")
+            }
+            if saved {
+                Label("已保存，下一条 AI 回答生效。", systemImage: "checkmark.circle").foregroundStyle(.green)
+            }
+        } footer: {
+            Text(dirty ? "\(patch.count) 项未保存。只提交本页改动，其他设置保持不变。" : "与 Web“AI → 回复排版与发送”共用同一组设置。")
+        }
+    }
+
+    private func supports(_ key: String) -> Bool { original?.supportedKeys.contains(key) == true }
+
+    private func replyToggle(_ key: String, title: String, detail: String, value: Binding<Bool>, extraDisabled: Bool = false) -> some View {
+        Toggle(isOn: value) {
+            AISettingLabel(title: title, detail: supports(key) ? detail : "服务器未提供此项，请更新服务器后设置。")
+        }
+        .disabled(busy || !supports(key) || extraDisabled)
+        .accessibilityIdentifier("ai.reply.\(key)")
+    }
+
+    private func apply(_ response: JSONValue) {
+        let next = AIReplySettingsDraft(response)
+        original = next
+        draft = next
+        workspace?.settings = response
+    }
+
+    private func load() async {
+        guard !loading, !saving else { return }
+        loading = true
+        defer { loading = false }
+        do {
+            let response = try await model.request(path: "/api/system/settings")
+            guard !Task.isCancelled else { return }
+            guard response.objectValue != nil else { throw APIError.incompatibleResponse }
+            let current = AIReplySettingsDraft(response)
+            if uncertain && !pendingKeys.isSubset(of: current.supportedKeys) {
+                loadError = "服务器返回的设置缺少待确认项目，仍无法核实保存结果。请检查服务器版本后重新读取。"
+                return
+            }
+            apply(response)
+            pendingKeys = []
+            loadError = nil; saveError = nil; uncertain = false; saved = false
+        } catch is CancellationError {
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    private func save() async {
+        guard !saving, !loading, !uncertain, !patch.isEmpty else { return }
+        let submitted = patch
+        saving = true; saveError = nil
+        pendingKeys = Set(submitted.keys)
+        defer { saving = false }
+        do {
+            let response = try await model.request(path: "/api/system/settings", method: "PATCH", body: .object(submitted))
+            guard AIReplySettingsDraft(response).confirms(submitted) else {
+                uncertain = true
+                saveError = "服务器未返回预期的新设置，保存结果尚未确认。请读取服务器状态核对，不要重复提交。"
+                return
+            }
+            apply(response)
+            pendingKeys = []
+            loadError = nil; saved = true
+        } catch {
+            saveError = error.localizedDescription
+            uncertain = (error as? APIError)?.isOutcomeUncertain == true
+            if !uncertain { pendingKeys = [] }
         }
     }
 }

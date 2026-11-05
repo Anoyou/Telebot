@@ -17,6 +17,9 @@ actor FixtureService: AppServing {
     private var accountAICommands: [Int: Set<Int>] = [1: [11], 2: []]
     private var fixtureSettings: JSONValue = [
         "timezone": "Asia/Shanghai", "command_prefix": ".", "ai_enabled": true, "ai_context_messages": 3,
+        "ai_reply_style": "normal", "ai_inline_delete_command": true, "ai_plugin_reply_via_bot": true,
+        "ai_stream_edit": false, "ai_layout_divider_before": true, "ai_layout_divider_after": true,
+        "ai_native_divider": true, "ai_inline_ask_enabled": true, "ai_inline_ask_show_question": true,
         "llm_limits": ["per_minute": 30, "daily_requests": 0, "daily_tokens": 500000, "premium_daily": 0],
         "log_retention": ["llm_usage_retention_days": 30],
         "app_update_target": ["remote": "origin", "branch": "Beta"]
