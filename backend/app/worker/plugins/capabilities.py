@@ -463,6 +463,17 @@ CAPABILITIES += (
     ),
 )
 
+# ── 0.120.0：Rich Message 原生分割线与统一回答排版 ──
+CAPABILITIES += (
+    Capability(
+        name="messages.rich_divider",
+        since="0.120.0-beta.2",
+        plugin_api="1.8",
+        summary="send_rich / edit_rich / answer_guest_query 的 Rich Markdown 里单独一行 ``---`` 渲染为 Telegram 原生分割线（InputRichBlockDivider），``<br>`` 为段内换行；宿主自己的 AI 回答统一排版为 引用 → 分割线 → 回答 → 分割线 → 署名，插件可按同一排版输出（旧宿主没有该能力时按原格式输出）",
+        doc=f"{_DOC}#能力协商与-plugin-api-版本",
+    ),
+)
+
 CAPABILITY_INDEX: dict[str, Capability] = {item.name: item for item in CAPABILITIES}
 if len(CAPABILITY_INDEX) != len(CAPABILITIES):  # pragma: no cover - 注册表自检
     raise RuntimeError("插件能力注册表存在重名条目")

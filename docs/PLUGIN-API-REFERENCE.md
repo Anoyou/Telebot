@@ -2957,6 +2957,8 @@ else:  # 旧宿主：退回旧属性探测
 | `interaction.entry_policy` / `provides.ai.image_backend` / `ui.rule_editor` | — | 宿主级 | 0.112.0-beta.2 |
 | `interaction.legacy_entry_keys` | — | 宿主级 | 0.112.0-beta.3 |
 | `runtime.contract_version` | — | 宿主级 | 0.115.0-beta.2 |
+| `messages.inline_via_bot` | — | live / entry | 0.119.0-beta.1 |
+| `messages.rich_divider`（Rich Markdown 单独一行 `---` = 原生分割线，`<br>` = 段内换行；AI 回答统一排版 引用 → 分割线 → 回答 → 分割线 → 署名） | — | 宿主级 | 0.120.0-beta.2 |
 
 以注册表与 `GET /api/plugins/capabilities` 为准；本表随宿主发版同步。
 
