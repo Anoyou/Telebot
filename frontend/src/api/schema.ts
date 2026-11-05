@@ -14341,15 +14341,40 @@ export interface components {
              */
             ai_enabled?: boolean | null;
             /**
+             * 响应 @Bot inline 提问 · ai_inline_ask_enabled
+             * @description 交互 Bot 开了 inline 模式后，群友输入「@交互Bot 问题」时会弹出「发送这个问题」，点了以后 AI 把回答写进这条消息（谁能问、每天几次沿用 AI 答疑的设置）。关掉则不弹出，输入框会一直转圈。需要在 @BotFather 打开 /setinlinefeedback。
+             */
+            ai_inline_ask_enabled?: boolean | null;
+            /**
+             * inline 提问显示问题 · ai_inline_ask_show_question
+             * @description inline 提问的回答顶部用引用块显示原来的问题。关掉则只显示回答。
+             */
+            ai_inline_ask_show_question?: boolean | null;
+            /**
              * inline 代发后删除指令消息 · ai_inline_delete_command
              * @description AI 回复方式为 inline 代发时，代发成功后删掉你发的那条 AI 指令消息，聊天里只留下答案。关掉则保留，答案回复在指令下面。
              */
             ai_inline_delete_command?: boolean | null;
             /**
-             * AI 回复方式 · ai_reply_style
-             * @description 普通：直接把指令消息改成回答。inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，再由交互 Bot 编辑成富文本答案（表格、引用等，非 Premium 也能用）。需要在 @BotFather 给交互 Bot 打开 /setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。
+             * 署名前加分割线 · ai_layout_divider_after
+             * @description 回答下面有署名、模型信息或来源时，在回答和它们之间加一条分割线，署名单独成一段。模板里已经有分割线就不重复加。
              */
-            ai_reply_style?: ("normal" | "inline") | null;
+            ai_layout_divider_after?: boolean | null;
+            /**
+             * 回答前加分割线 · ai_layout_divider_before
+             * @description AI 回答上面有引用（被回复的消息、问题）或标题时，在它们和回答之间自动加一条分割线。模板里已经有分割线就不重复加。
+             */
+            ai_layout_divider_before?: boolean | null;
+            /**
+             * 用原生分割线 · ai_native_divider
+             * @description 回答是富文本时（inline 代发、原消息富文本编辑），分割线用 Telegram 自带的那种细横线，模板和回答里手打的整行横线也会换成它。关掉则用一整行「━━━」文字。普通回复不支持原生分割线，始终是整行「━」。
+             */
+            ai_native_divider?: boolean | null;
+            /**
+             * AI 回复方式 · ai_reply_style
+             * @description 普通：直接把指令消息改成回答（普通格式，分割线用整行「━」代替）。在原消息上编辑（富文本）：同样改你自己的指令消息，但用 Telegram 原生富文本（原生分割线、表格、标题），需要本账号是 Telegram Premium，不满足时自动改用普通。inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，再由交互 Bot 编辑成富文本答案（表格、引用等，非 Premium 也能用）。需要在 @BotFather 给交互 Bot 打开 /setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。排版统一为：引用 → 分割线 → 回答 → 分割线 → 署名。
+             */
+            ai_reply_style?: ("normal" | "edit_rich" | "inline") | null;
             /** 服务器更新来源 · app_update_target */
             app_update_target?: components["schemas"]["_AppUpdateTargetPatch"] | null;
             /**

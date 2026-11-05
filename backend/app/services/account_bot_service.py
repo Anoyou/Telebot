@@ -2411,6 +2411,13 @@ async def edit_inline_message(
     """编辑 inline 消息（含 Guest Mode ``answerGuestQuery`` 返回的 ``inline_message_id``）。"""
 
     normalized_parse_mode = normalize_bot_parse_mode(parse_mode)
+    # inline 提问（0.119.1）：编辑时在顶部带上问题、默认去掉 ⏳ 按钮；其它 inline 消息原样。
+    from . import inline_ai_ask  # noqa: PLC0415
+
+    decorated, _, reply_markup = await inline_ai_ask.prepare_inline_edit(
+        str(inline_message_id), text=text, parse_mode=normalized_parse_mode, reply_markup=reply_markup
+    )
+    text = decorated if decorated is not None else text
     payload: dict[str, Any] = {
         "inline_message_id": str(inline_message_id),
         "text": _truncate_bot_text(text, parse_mode=normalized_parse_mode, limit=BOT_MESSAGE_TEXT_LIMIT),
@@ -2496,9 +2503,14 @@ async def edit_inline_rich_message(
     消息时不支持直传新文件或按 URL 上传文件。
     """
 
+    from . import inline_ai_ask  # noqa: PLC0415
+
+    _, decorated, reply_markup = await inline_ai_ask.prepare_inline_edit(
+        str(inline_message_id), rich_message=rich_message, reply_markup=reply_markup
+    )
     payload: dict[str, Any] = {
         "inline_message_id": str(inline_message_id),
-        "rich_message": normalize_rich_message(rich_message),
+        "rich_message": normalize_rich_message(decorated if decorated is not None else rich_message),
     }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
@@ -2592,6 +2604,15 @@ async def answer_guest_query(
     回复一次，因此调用方必须保证同一个 ``guest_query_id`` 只调用一次。
     """
 
+    from . import inline_ai_ask  # noqa: PLC0415
+
+    if inline_ai_ask.is_ask_guest_query_id(guest_query_id):
+        # inline 提问合成的访客消息（0.119.1）：消息已经以 inline 结果发出，这里改为编辑它。
+        sent = await inline_ai_ask.answer_guest_as_edit(token, str(guest_query_id), dict(result))
+        from .interaction.guest_reply import link_guest_inline_origin  # noqa: PLC0415
+
+        await link_guest_inline_origin(token, str(guest_query_id), str(sent.get("inline_message_id") or ""))
+        return sent
     payload: dict[str, Any] = {
         "guest_query_id": str(guest_query_id),
         "result": dict(result),

@@ -65,6 +65,7 @@ from . import (
     audit,
     command_service,
     feature_service,
+    inline_ai_ask,
     payment_notice_legacy,
     payment_source_ledger,
     payment_sources,
@@ -1036,6 +1037,8 @@ class Incoming:
     callback_already_acked: bool = False
     management_rich_html_required: bool = False
     guest_reply: GuestReplyBuffer | None = None
+    # 本条 inline 查询已有人 answerInlineQuery（插件 / 平台），用于 inline 提问兜底（0.119.1）。
+    inline_answered: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -3190,6 +3193,125 @@ async def _handle_interaction_update(aid: int, token: str, update: dict[str, Any
                 return
         except Exception:  # noqa: BLE001
             log.warning("inline ai relay failed aid=%s", incoming.account_id, exc_info=True)
+    # inline 提问（0.119.1）：「@Bot 问题」在 inline 模式下也走访客 AI 答疑，见 inline_ai_ask。
+    if incoming.chosen_inline_result_id and (
+        inline_ai_ask.is_ask_result_id(incoming.chosen_inline_result_id)
+        or inline_ai_ask.is_help_result_id(incoming.chosen_inline_result_id)
+    ):
+        await _handle_inline_ask_chosen(incoming)
+        return
+    if incoming.inline_query_id:
+        try:
+            await _route_interaction_incoming(incoming)
+        finally:
+            if not incoming.inline_answered:
+                await _answer_inline_ask_query(incoming)
+        return
+    await _route_interaction_incoming(incoming)
+
+
+async def _inline_ask_unavailable_reason(incoming: Incoming) -> str | None:
+    """inline 提问是否可用：沿用访客提问的开关、处理插件与限流（只查看，不占用限流名额）。"""
+
+    flags = await _event_framework_flags()
+    if not flags.get("guest_updates_enabled", True):
+        return inline_ai_ask.REASON_GUEST_DISABLED
+    cached_state = _cached_interaction_routing_state(incoming.account_id)
+    if cached_state is not None:
+        _, index = cached_state
+        if incoming.user_id is not None and index.interaction_bot_id == incoming.user_id:
+            return inline_ai_ask.REASON_SELF
+        if (
+            not index.event_bus_unknown
+            and "guest_message" not in index.event_bus_event_types
+            and "all_events" not in index.event_bus_event_types
+        ):
+            return inline_ai_ask.REASON_NO_HANDLER
+    if not guest_rate_limiter.would_allow(
+        account_id=incoming.account_id, role="interaction_bot", user_id=incoming.user_id
+    ):
+        return inline_ai_ask.REASON_RATE_LIMITED
+    return None
+
+
+async def _answer_inline_ask_query(incoming: Incoming) -> None:
+    """插件都没回答这条 inline 查询时，平台回「发送这个问题」（或提示 / 空结果），客户端不再转圈。"""
+
+    from . import inline_ai_relay  # noqa: PLC0415
+
+    pref = await inline_ai_relay.read_reply_preference(cached=True)
+    if not pref.get("ai_inline_ask_enabled", True):
+        return  # 服务器参数「响应 @Bot inline 提问」已关闭：平台不回答（与 0.119.0 之前一致）
+    try:
+        reason = await _inline_ask_unavailable_reason(incoming)
+    except Exception:  # noqa: BLE001
+        log.debug("inline ask availability check failed aid=%s", incoming.account_id, exc_info=True)
+        reason = None
+    answer = inline_ai_ask.query_answer(
+        incoming.inline_query_text,
+        chat_type=incoming.inline_chat_type,
+        unavailable_reason=reason,
+        show_question=bool(pref.get("ai_inline_ask_show_question", True)),
+    )
+    try:
+        await account_bot_service.answer_inline_query(
+            incoming.token,
+            str(incoming.inline_query_id),
+            results=answer["results"],
+            cache_time=answer["cache_time"],
+            is_personal=answer["is_personal"],
+        )
+        incoming.inline_answered = True
+    except Exception as exc:  # noqa: BLE001
+        log.info(
+            "inline ask answerInlineQuery failed aid=%s: %s",
+            incoming.account_id,
+            account_bot_service.sanitize_bot_error(exc, token=incoming.token),
+        )
+    if reason:
+        log.info("inline ask unavailable aid=%s reason=%s", incoming.account_id, reason)
+
+
+async def _handle_inline_ask_chosen(incoming: Incoming) -> None:
+    """选中「发送这个问题」：合成访客消息走原 AI 答疑链路，答案编辑进这条 inline 消息。"""
+
+    if inline_ai_ask.is_help_result_id(incoming.chosen_inline_result_id):
+        return
+    raw = incoming.native_raw if isinstance(incoming.native_raw, dict) else {}
+    chosen = raw.get("chosen_inline_result") if isinstance(raw.get("chosen_inline_result"), dict) else {}
+    inline_message_id = str(chosen.get("inline_message_id") or "").strip()
+    question = inline_ai_ask.normalize_question(incoming.inline_query_text)
+    if not inline_message_id or not question:
+        log.info(
+            "inline ask chosen without inline_message_id aid=%s (BotFather /setinlinefeedback 未开启或结果没有按钮)",
+            incoming.account_id,
+        )
+        return
+    from . import inline_ai_relay  # noqa: PLC0415
+
+    pref = await inline_ai_relay.read_reply_preference(cached=True)
+    await inline_ai_ask.register(
+        inline_message_id,
+        question,
+        show_question=bool(pref.get("ai_inline_ask_show_question", True)),
+        divider=bool(pref.get("ai_layout_divider_before", True)),
+    )
+    update = inline_ai_ask.synthetic_guest_update(
+        update_id=incoming.update_id,
+        from_user=chosen.get("from") if isinstance(chosen.get("from"), dict) else {},
+        question=question,
+        inline_message_id=inline_message_id,
+        chat_type=inline_ai_ask.chat_type_from_result_id(incoming.chosen_inline_result_id),
+    )
+    guest = _extract_incoming(incoming.account_id, incoming.token, update)
+    try:
+        if guest is not None:
+            await _route_interaction_incoming(guest)
+    finally:
+        await inline_ai_ask.finish_if_untouched(incoming.token, inline_message_id)
+
+
+async def _route_interaction_incoming(incoming: Incoming) -> None:
     flags = await _event_framework_flags()
     if (incoming.inline_query_id or incoming.chosen_inline_result_id) and not flags.get("inline_updates_enabled", True):
         return

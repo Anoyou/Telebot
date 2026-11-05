@@ -2158,6 +2158,10 @@ class InteractionDeliveryExecutor:
                 next_offset=str(action.get("next_offset") or ""),
                 button=action.get("button") if isinstance(action.get("button"), dict) else None,
             )
+            try:
+                self.incoming.inline_answered = True  # inline 提问兜底不再重复回答（0.119.1）
+            except AttributeError:
+                pass
         except Exception as exc:  # noqa: BLE001
             await record_action(
                 action.get("context"),

@@ -766,12 +766,33 @@ async def _render_and_deliver_text_result(
     else:
         escape_format = None
 
-    body = render_output(template, render_ctx, escape_format=escape_format)
+    # 排版（0.120.0，用户指定）：引用 → 分割线 → 回答 → 分割线 → 署名；普通格式的分割线是整行「━」。
+    from ..services import inline_ai_relay
+    from ..services.rich_template import render_template_rich_markdown, render_template_text_layout
+
+    pref = await inline_ai_relay.read_reply_preference()
+    layout = {
+        "divider_before": bool(pref.get("ai_layout_divider_before", True)),
+        "divider_after": bool(pref.get("ai_layout_divider_after", True)),
+    }
+    rich_layout = {**layout, "native_divider": bool(pref.get("ai_native_divider", True))}
+    try:
+        body = render_template_text_layout(template, render_ctx, escape_format=escape_format, **layout)
+    except Exception:  # noqa: BLE001 - 排版增强失败时按原模板渲染
+        log.warning("[ai] text layout failed; using plain template render", exc_info=True)
+        body = render_output(template, render_ctx, escape_format=escape_format)
+
+    if inline_handle is None and send_mode == "edit" and not self_msg_has_image:
+        if pref.get("style") == inline_ai_relay.REPLY_STYLE_EDIT_RICH and await _maybe_edit_rich_in_place(
+            client, event, template, render_ctx, account_id=account_id, rich_layout=rich_layout
+        ):
+            return
 
     if inline_handle is not None:
-        # inline 代发：交互 Bot 把占位编辑成 Rich Message。模板里的 HTML 标签原样保留（Rich Markdown
-        # 允许内嵌 HTML），回答保持 Markdown 以便表格转成原生表格；被拒时退回 HTML 正文，再退纯文本。
-        rich_markdown = render_output(template, render_ctx, escape_format=None)
+        # inline 代发：交互 Bot 把占位编辑成 Rich Message。模板按字面渲染（换行保留、<blockquote> 转引用、
+        # 整行横线转原生分割线），回答保持完整 Markdown，排版与普通 Rich Message 一致（0.119.1）；
+        # 被拒时退回 HTML 正文，再退纯文本。
+        rich_markdown = render_template_rich_markdown(template, render_ctx, **rich_layout)
         html_body = body if output_format == "html" else None
         plain_body = (
             f"{result.text}\n\n— {model_display} · in {result.input_tokens} / out {result.output_tokens}"
@@ -867,6 +888,58 @@ async def _render_and_deliver_text_result(
                 )
             except Exception:
                 pass
+
+
+async def _maybe_edit_rich_in_place(
+    client: Any,
+    event: Any,
+    template: str,
+    render_ctx: dict[str, Any],
+    *,
+    account_id: int,
+    rich_layout: dict[str, bool] | None = None,
+) -> bool:
+    """「AI 回复方式」= 在原消息上编辑（富文本）：用户账号把自己的指令消息直接编辑成原生 Rich Message。
+
+    走 MTProto ``messages.editMessage(rich_message=…)``（与交互 Bot 的 editMessageText.rich_message 同一种
+    InputRichMessage：原生分割线、表格、标题、引用都可用），需要账号是 Telegram Premium 且服务器 app config
+    允许发 Rich Message；不满足或 Telegram 拒绝时返回 False，由调用方照旧普通编辑。
+    """
+
+    if not getattr(event, "out", False) or getattr(event, "chat_id", None) is None or getattr(event, "id", None) is None:
+        return False
+    from ..services import userbot_rich_message
+
+    try:
+        capability = await userbot_rich_message.detect_rich_message_capability(client)
+    except Exception:  # noqa: BLE001
+        log.info("[ai-rich-edit] capability probe failed account=%s; using normal edit", account_id, exc_info=True)
+        return False
+    if not capability.available:
+        log.info(
+            "[ai-rich-edit] rich message unavailable account=%s reason=%s; using normal edit",
+            account_id,
+            capability.error_code,
+        )
+        return False
+    from ..services.rich_template import render_template_rich_markdown
+
+    markdown = render_template_rich_markdown(template, render_ctx, **(rich_layout or {}))
+    if not markdown.strip():
+        return False
+    try:
+        await userbot_rich_message.edit_rich_message(
+            client,
+            event.chat_id,
+            int(event.id),
+            {"markdown": markdown},
+            capability=capability,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.info("[ai-rich-edit] rich edit failed account=%s: %s; using normal edit", account_id, exc)
+        return False
+    log.info("[ai-rich-edit] delivered account=%s", account_id)
+    return True
 
 
 _INLINE_HANDLE: contextvars.ContextVar[Any] = contextvars.ContextVar("ai_inline_reply_handle", default=None)

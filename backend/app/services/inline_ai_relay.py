@@ -38,7 +38,9 @@ DEFAULT_PLACEHOLDER = "🤔 思考中…"
 PLACEHOLDER_BUTTON_TEXT = "⏳ AI 生成中…"
 REPLY_STYLE_NORMAL = "normal"
 REPLY_STYLE_INLINE = "inline"
-REPLY_STYLES = (REPLY_STYLE_NORMAL, REPLY_STYLE_INLINE)
+# 0.120.0：用户账号直接把指令消息编辑成原生富文本（messages.editMessage.rich_message，需 Premium）。
+REPLY_STYLE_EDIT_RICH = "edit_rich"
+REPLY_STYLES = (REPLY_STYLE_NORMAL, REPLY_STYLE_EDIT_RICH, REPLY_STYLE_INLINE)
 
 FEEDBACK_OK = "ok"
 FEEDBACK_MISSING = "missing"
@@ -283,11 +285,37 @@ async def read_feedback_status(aid: int, *, redis: Any = None) -> str | None:
     return value if value in {FEEDBACK_OK, FEEDBACK_MISSING} else None
 
 
-async def read_reply_preference() -> dict[str, Any]:
-    """读取全局「AI 回复方式」设置（每次调用读库，Web/App 改完立即生效）。"""
+# AI 回答排版与 inline 提问的开关（0.120.0）：键 → 默认值。都存成 ``{"enabled": bool}``。
+AI_LAYOUT_SWITCHES: dict[str, bool] = {
+    "ai_layout_divider_before": True,  # 引用 / 标题和回答之间加分割线
+    "ai_layout_divider_after": True,  # 回答和署名之间加分割线（署名单独一段）
+    "ai_native_divider": True,  # 富文本时用 Telegram 原生分割线（关掉用整行「━」文字）
+    "ai_inline_ask_enabled": True,  # 响应「@交互Bot 问题」的 inline 查询
+    "ai_inline_ask_show_question": True,  # inline 提问的回答顶部显示问题引用
+}
+_PREF_CACHE: tuple[float, dict[str, Any]] | None = None
+_PREF_CACHE_SECONDS = 5.0
 
-    style = REPLY_STYLE_NORMAL
-    delete_command = True
+
+def normalize_switch(value: Any, default: bool) -> bool:
+    if isinstance(value, dict):
+        value = value.get("enabled", value.get("value", default))
+    if value is None:
+        return default
+    return bool(value)
+
+
+async def read_reply_preference(*, cached: bool = False) -> dict[str, Any]:
+    """读取全局「AI 回复方式」与排版开关（默认每次读库，Web/App 改完立即生效）。
+
+    ``cached=True`` 用 5 秒进程内缓存（inline 查询随输入频繁到达时使用）。
+    """
+
+    global _PREF_CACHE
+    now = time.monotonic()
+    if cached and _PREF_CACHE is not None and now - _PREF_CACHE[0] < _PREF_CACHE_SECONDS:
+        return dict(_PREF_CACHE[1])
+    pref: dict[str, Any] = {"style": REPLY_STYLE_NORMAL, "delete_command": True, **AI_LAYOUT_SWITCHES}
     try:
         from ..db.base import AsyncSessionLocal
         from ..db.models.system import SystemSetting
@@ -295,19 +323,26 @@ async def read_reply_preference() -> dict[str, Any]:
         async with AsyncSessionLocal() as db:
             style_row = await db.get(SystemSetting, "ai_reply_style")
             delete_row = await db.get(SystemSetting, "ai_inline_delete_command")
-        style = normalize_reply_style(style_row.value if style_row is not None else None)
-        delete_command = normalize_delete_command(delete_row.value if delete_row is not None else None)
+            switch_rows = {key: await db.get(SystemSetting, key) for key in AI_LAYOUT_SWITCHES}
+        pref["style"] = normalize_reply_style(style_row.value if style_row is not None else None)
+        pref["delete_command"] = normalize_delete_command(delete_row.value if delete_row is not None else None)
+        for key, default in AI_LAYOUT_SWITCHES.items():
+            row = switch_rows.get(key)
+            pref[key] = normalize_switch(row.value if row is not None else None, default)
     except Exception:  # noqa: BLE001
-        log.debug("read ai reply preference failed; using normal", exc_info=True)
-    return {"style": style, "delete_command": delete_command}
+        log.debug("read ai reply preference failed; using defaults", exc_info=True)
+    _PREF_CACHE = (now, dict(pref))
+    return pref
 
 
 __all__ = [
+    "AI_LAYOUT_SWITCHES",
     "DEFAULT_PLACEHOLDER",
     "FEEDBACK_MISSING",
     "FEEDBACK_OK",
     "NOOP_CALLBACK_DATA",
     "QUERY_PREFIX",
+    "REPLY_STYLE_EDIT_RICH",
     "REPLY_STYLE_INLINE",
     "REPLY_STYLE_NORMAL",
     "handle_interaction_update",
@@ -315,6 +350,7 @@ __all__ = [
     "mark_feedback_missing",
     "normalize_delete_command",
     "normalize_reply_style",
+    "normalize_switch",
     "parse_query_token",
     "placeholder_result",
     "read_feedback_status",

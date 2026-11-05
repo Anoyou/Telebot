@@ -257,6 +257,18 @@ def has_compact_tables(rich_message: Any) -> bool:
     return _rc.rich_message_has_compact_tables(rich_message)
 
 
+def is_divider_line(line: str) -> bool:
+    """整行横线（``---`` / ``————`` / ``━━━`` 等）判定，见 ``rich_compact.DIVIDER_LINE_RE``。"""
+
+    return _rc.is_divider_line(line)
+
+
+def normalize_markdown_dividers(text: str) -> str:
+    """Rich Markdown 整行横线 → 原生分割线 ``---``（InputRichBlockDivider，0.120.0）。"""
+
+    return _rc.normalize_markdown_dividers(text)
+
+
 def is_compact_unsupported_error(exc: BaseException | str) -> bool:
     return _rc.is_compact_unsupported_error(exc)
 
@@ -273,6 +285,8 @@ __all__ = [
     "apply_transport_table_defaults",
     "core_middleware_catalog",
     "has_compact_tables",
+    "is_divider_line",
+    "normalize_markdown_dividers",
     "is_compact_unsupported_error",
     "merge_render_profiles",
     "normalize_render_profile",

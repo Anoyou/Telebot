@@ -601,6 +601,18 @@ class GuestRateLimiter:
                 self._buckets.pop(key, None)
         return True
 
+    def would_allow(self, *, account_id: int, role: str, user_id: int | None, now: float | None = None) -> bool:
+        """只查看、不占用名额（inline 提问在用户输入时判断是否还能提问）。"""
+
+        current = time.monotonic() if now is None else now
+        bot_key = f"{account_id}:{role}"
+        user_key = f"{bot_key}:{user_id if user_id is not None else 'anon'}"
+        for key, limit in ((bot_key, self.per_bot), (user_key, self.per_user)):
+            bucket = self._buckets.get(key)
+            if bucket is not None and sum(1 for item in bucket if current - item < self.window_seconds) >= limit:
+                return False
+        return True
+
     def reset(self) -> None:
         self._buckets.clear()
 

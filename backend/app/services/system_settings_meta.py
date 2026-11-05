@@ -126,17 +126,43 @@ SETTINGS_META: list[dict[str, Any]] = [
            _loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM, ios=IOS_AI_GLOBAL, ios_label="AI › AI 全局设置"),
        ]),
     _p("ai_reply_style", "AI 回复方式",
-       "普通：直接把指令消息改成回答。inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，"
+       "普通：直接把指令消息改成回答（普通格式，分割线用整行「━」代替）。在原消息上编辑（富文本）：同样改你自己的指令消息，"
+       "但用 Telegram 原生富文本（原生分割线、表格、标题），需要本账号是 Telegram Premium，不满足时自动改用普通。"
+       "inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，"
        "再由交互 Bot 编辑成富文本答案（表格、引用等，非 Premium 也能用）。需要在 @BotFather 给交互 Bot 打开 "
-       "/setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。",
+       "/setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。"
+       "排版统一为：引用 → 分割线 → 回答 → 分割线 → 署名。",
        "enum", "command", default="normal",
        options=[
            {"value": "normal", "label": "普通（默认）"},
+           {"value": "edit_rich", "label": "在原消息上编辑（富文本，需 Premium）"},
            {"value": "inline", "label": "inline 代发（交互 Bot 富文本）"},
        ],
        also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
     _p("ai_inline_delete_command", "inline 代发后删除指令消息",
        "AI 回复方式为 inline 代发时，代发成功后删掉你发的那条 AI 指令消息，聊天里只留下答案。关掉则保留，答案回复在指令下面。",
+       "bool", "command", default=True,
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+    _p("ai_layout_divider_before", "回答前加分割线",
+       "AI 回答上面有引用（被回复的消息、问题）或标题时，在它们和回答之间自动加一条分割线。模板里已经有分割线就不重复加。",
+       "bool", "command", default=True,
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+    _p("ai_layout_divider_after", "署名前加分割线",
+       "回答下面有署名、模型信息或来源时，在回答和它们之间加一条分割线，署名单独成一段。模板里已经有分割线就不重复加。",
+       "bool", "command", default=True,
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+    _p("ai_native_divider", "用原生分割线",
+       "回答是富文本时（inline 代发、原消息富文本编辑），分割线用 Telegram 自带的那种细横线，模板和回答里手打的整行横线也会换成它。"
+       "关掉则用一整行「━━━」文字。普通回复不支持原生分割线，始终是整行「━」。",
+       "bool", "command", default=True,
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+    _p("ai_inline_ask_enabled", "响应 @Bot inline 提问",
+       "交互 Bot 开了 inline 模式后，群友输入「@交互Bot 问题」时会弹出「发送这个问题」，点了以后 AI 把回答写进这条消息"
+       "（谁能问、每天几次沿用 AI 答疑的设置）。关掉则不弹出，输入框会一直转圈。需要在 @BotFather 打开 /setinlinefeedback。",
+       "bool", "command", default=True,
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+    _p("ai_inline_ask_show_question", "inline 提问显示问题",
+       "inline 提问的回答顶部用引用块显示原来的问题。关掉则只显示回答。",
        "bool", "command", default=True,
        also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
     _p("command_echo_guard_previous_messages", "命令回声防误触",
