@@ -342,6 +342,7 @@ async def test_plugin_inline_via_bot_guards(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(command, "get_command_context", lambda: SimpleNamespace(self_tg_user_id=1001))
     monkeypatch.setattr(inline_ai_relay, "read_reply_preference", AsyncMock(return_value={"style": "normal"}))
+    monkeypatch.setattr(inline_ai_reply, "_bot_in_chat", AsyncMock(return_value=False))
     client = _Client([])
     out = await inline_ai_reply.plugin_inline_via_bot(client, account_id=7, chat_id=-100123, requester_user_id=1001)
     assert out["ok"] is False and out["reason"] == "style_normal"
@@ -374,3 +375,67 @@ def test_capability_registered_for_live_and_entry_facades() -> None:
 
     cap = CAPABILITY_INDEX["messages.inline_via_bot"]
     assert cap.facades == frozenset({FACADE_LIVE, FACADE_ENTRY})
+
+
+@pytest.mark.asyncio
+async def test_plugin_inline_via_bot_prefers_bot_when_bot_in_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """0.120.1：交互 Bot 就在群里（插件事件来自 Bot）时默认由 Bot 直接回复，不借账号代发。"""
+
+    from app.worker import command
+
+    monkeypatch.setattr(command, "get_command_context", lambda: SimpleNamespace(self_tg_user_id=1001))
+    in_chat = AsyncMock(return_value=True)
+    monkeypatch.setattr(inline_ai_reply, "_bot_in_chat", in_chat)
+    start = AsyncMock(return_value=(SimpleNamespace(inline_message_id="IM", message_id=9), ""))
+    monkeypatch.setattr(inline_ai_reply, "start_inline_reply", start)
+    monkeypatch.setattr(
+        inline_ai_relay, "read_reply_preference", AsyncMock(return_value={"style": "inline", "delete_command": True})
+    )
+    client = _Client([])
+    out = await inline_ai_reply.plugin_inline_via_bot(
+        client, account_id=7, chat_id=-1001234567890, requester_user_id=1001, delete_message_id=5
+    )
+    assert out == {"ok": False, "reason": "bot_reply_preferred", "inline_message_id": None, "message_id": None, "deleted_message": False}
+    start.assert_not_awaited()
+    assert client.deleted == []
+
+    # 非账号本人：先按 not_owner 拒绝，不去查 Bot 成员关系。
+    in_chat.reset_mock()
+    out = await inline_ai_reply.plugin_inline_via_bot(client, account_id=7, chat_id=-1001234567890, requester_user_id=2)
+    assert out["reason"] == "not_owner"
+    in_chat.assert_not_awaited()
+
+    # Bot 不在群里：照旧 inline 代发。
+    in_chat.return_value = False
+    out = await inline_ai_reply.plugin_inline_via_bot(client, account_id=7, chat_id=-1001234567890, requester_user_id=1001)
+    assert out["ok"] is True
+
+    # 开关关掉：恢复旧行为，不查成员关系。
+    in_chat.reset_mock()
+    in_chat.return_value = True
+    monkeypatch.setattr(
+        inline_ai_relay,
+        "read_reply_preference",
+        AsyncMock(return_value={"style": "inline", "delete_command": True, "ai_plugin_reply_via_bot": False}),
+    )
+    out = await inline_ai_reply.plugin_inline_via_bot(client, account_id=7, chat_id=-1001234567890, requester_user_id=1001)
+    assert out["ok"] is True
+    in_chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_bot_in_chat_uses_membership_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import account_bot_service
+
+    monkeypatch.setattr(inline_ai_reply, "_load_bot_token", AsyncMock(return_value="123:abc"))
+    monkeypatch.setattr(account_bot_service, "get_bot_capabilities", AsyncMock(return_value={"bot_id": 42}))
+    probe = AsyncMock(return_value=[{"chat_id": -100, "status": "joined"}])
+    monkeypatch.setattr(account_bot_service, "inspect_bot_chat_memberships", probe)
+    assert await inline_ai_reply._bot_in_chat(7, -100) is True
+    assert probe.await_args.args == ("123:abc", 42, [-100])
+    probe.return_value = [{"chat_id": -100, "status": "not_joined"}]
+    assert await inline_ai_reply._bot_in_chat(7, -100) is False
+    probe.side_effect = RuntimeError("boom")
+    assert await inline_ai_reply._bot_in_chat(7, -100) is False
+    # 私聊不算“群里”
+    assert await inline_ai_reply._bot_in_chat(7, 555) is False

@@ -284,3 +284,76 @@ async def test_edit_rich_in_place_falls_back_silently(monkeypatch) -> None:
     monkeypatch.setattr(userbot_rich_message, "detect_rich_message_capability", cap_ok)
     assert await ai_runtime._maybe_edit_rich_in_place(object(), event, USER_TEMPLATE, _ctx(), account_id=1)
     assert edits[0]["markdown"].split("\n\n")[2] == "---"
+
+
+# ---------------------------------------------------------------------------
+# 0.120.1：问题引用下面的分割线（第 28 轮真机反馈 1.1）
+# ---------------------------------------------------------------------------
+_R28_CTX = {
+    "answer": "第一行\n第二行\n第三行\n第四行\n第五行",
+    "question": "什么是X",
+    "quoted": "",
+    "model": "M",
+    "provider": "P",
+    "in_tokens": 1,
+    "out_tokens": 2,
+    "total_tokens": 3,
+}
+
+
+def test_r28_text_layout_divider_right_under_quote_with_title_line() -> None:
+    from app.services.llm_format import PRESET_QUOTE
+    from app.services.rich_template import TEXT_DIVIDER, render_template_text_layout
+
+    body = render_template_text_layout(PRESET_QUOTE, dict(_R28_CTX), escape_format="html")
+    lines = body.split("\n")
+    quote_end = next(i for i, line in enumerate(lines) if line.endswith("</blockquote>") and "什么是X" in line)
+    assert lines[quote_end + 1] == TEXT_DIVIDER
+    assert lines[quote_end + 2] == "<b>✨ AI 回答</b>"
+    # 标题和回答之间不再夹分割线
+    assert lines[quote_end + 3] == "第一行"
+
+
+def test_r28_text_layout_quote_and_answer_on_same_line() -> None:
+    from app.services.rich_template import TEXT_DIVIDER, render_template_text_layout
+
+    tpl = "<blockquote expandable>{display_input}</blockquote>{answer}\n✦ {model} ✦"
+    body = render_template_text_layout(tpl, dict(_R28_CTX), escape_format="html")
+    assert body.split("\n") == [
+        "<blockquote expandable>什么是X</blockquote>",
+        TEXT_DIVIDER,
+        "第一行",
+        "第二行",
+        "第三行",
+        "第四行",
+        "第五行",
+        TEXT_DIVIDER,
+        "✦ M ✦",
+    ]
+    # 开关关掉时保持模板原样（不拆行、不补线）
+    off = render_template_text_layout(tpl, dict(_R28_CTX), escape_format="html", divider_before=False)
+    assert off.startswith("<blockquote expandable>什么是X</blockquote>第一行")
+
+
+def test_r28_rich_layout_divider_under_quote_not_title() -> None:
+    from app.services.llm_format import PRESET_QUOTE
+    from app.services.rich_template import render_template_rich_markdown
+
+    md = render_template_rich_markdown(PRESET_QUOTE, dict(_R28_CTX))
+    blocks = md.split("\n\n")
+    assert blocks[0] == "> 什么是X"
+    assert blocks[1] == "---"
+    assert blocks[2] == "<b>✨ AI 回答</b>"
+    assert blocks[3].startswith("第一行")
+    assert blocks.count("---") == 2
+
+
+def test_r28_rich_layout_long_paragraph_between_keeps_divider_above_answer() -> None:
+    from app.services.rich_template import render_template_rich_markdown
+
+    tpl = "<blockquote>{question}</blockquote>\n" + "很长的一段说明文字" * 10 + "\n{answer}"
+    md = render_template_rich_markdown(tpl, dict(_R28_CTX))
+    blocks = md.split("\n\n")
+    assert blocks[0] == "> 什么是X"
+    assert blocks[1] != "---"
+    assert blocks[2] == "---" and blocks[3].startswith("第一行")

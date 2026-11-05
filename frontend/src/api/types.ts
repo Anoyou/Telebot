@@ -1070,6 +1070,8 @@ export interface SystemSettings {
   ai_inline_ask_show_question?: boolean;
   /** 「在原消息上编辑」时按段落流式编辑；默认 false */
   ai_stream_edit?: boolean;
+  /** 插件在交互 Bot 所在群里被触发时由 Bot 直接回复（不走 inline 代发）；默认 true */
+  ai_plugin_reply_via_bot?: boolean;
   /** IANA 时区标识，如 "Asia/Shanghai"；默认 Asia/Shanghai */
   timezone?: string;
   remote_plugin_update_check?: {

@@ -14371,6 +14371,11 @@ export interface components {
              */
             ai_native_divider?: boolean | null;
             /**
+             * Bot 在群里时由 Bot 回复 · ai_plugin_reply_via_bot
+             * @description AI 答疑插件被关键词或 @Bot 触发时（包括你自己触发），交互 Bot 就在这个群里就由 Bot 直接回复那条消息；Bot 不在群里才借你的账号代发。关掉则在「AI 回复方式」= inline 代发时照旧用你的账号发“你 via @Bot”并删掉提问消息。
+             */
+            ai_plugin_reply_via_bot?: boolean | null;
+            /**
              * AI 回复方式 · ai_reply_style
              * @description 普通：直接把指令消息改成回答（普通格式，分割线用整行「━」代替）。在原消息上编辑（富文本）：同样改你自己的指令消息，但用 Telegram 原生富文本（原生分割线、表格、标题），需要本账号是 Telegram Premium，不满足时自动改用普通。inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，再由交互 Bot 编辑成富文本答案（表格、引用等，非 Premium 也能用）。需要在 @BotFather 给交互 Bot 打开 /setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。排版统一为：引用 → 分割线 → 回答 → 分割线 → 署名。
              */

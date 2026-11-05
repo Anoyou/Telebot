@@ -288,6 +288,26 @@ __all__ = ["InlineProxyEvent", "InlineReplyHandle", "plugin_inline_via_bot", "st
 _SUPERGROUP_MIN_ID = -(10**12)
 
 
+async def _bot_in_chat(account_id: int, chat_id: int) -> bool:
+    """本账号的交互 Bot 是否在这个会话里（getChatMember，结果有短缓存）；查不到一律当作不在。"""
+
+    if chat_id > 0:
+        return False
+    token = await _load_bot_token(account_id)
+    if not token:
+        return False
+    try:
+        caps = await account_bot_service.get_bot_capabilities(token)
+        bot_id = caps.get("bot_id")
+        if not bot_id:
+            return False
+        rows = await account_bot_service.inspect_bot_chat_memberships(token, int(bot_id), [int(chat_id)])
+    except Exception:  # noqa: BLE001
+        log.debug("[ai-inline] bot membership probe failed account=%s", account_id, exc_info=True)
+        return False
+    return bool(rows) and rows[0].get("status") == "joined"
+
+
 async def plugin_inline_via_bot(
     client: Any,
     *,
@@ -303,7 +323,8 @@ async def plugin_inline_via_bot(
 ) -> dict[str, Any]:
     """``ctx.messages.inline_via_bot`` 的实现（能力 ``messages.inline_via_bot``，0.119.0）。
 
-    - 遵循服务器参数「AI 回复方式」（``respect_setting=False`` 可跳过）与「inline 代发后删除指令消息」；
+    - 遵循服务器参数「AI 回复方式」、「插件触发由 Bot 直接回复」（默认开，开着就返回 ``bot_reply_preferred``）
+      与「inline 代发后删除指令消息」（``respect_setting=False`` 全部跳过）；
     - 只接受账号本人（``requester_user_id`` = UserBot 自己的 user_id）触发，防止群友借机以账号名义发消息；
     - 交互 Bot 事件里的 message_id 只在超级群 / 频道（-100…）与 UserBot 一致；普通群 / 私聊默认不引用、
       不删除（``same_message_ids=True`` 可显式声明 ID 一致，例如 UserBot 来源的事件）。
@@ -322,10 +343,12 @@ async def plugin_inline_via_bot(
     except (TypeError, ValueError):
         return _fail("chat_unknown")
     delete_command = True
+    prefer_bot = False
     if respect_setting:
         pref = await inline_ai_relay.read_reply_preference()
         if pref.get("style") != inline_ai_relay.REPLY_STYLE_INLINE:
             return _fail("style_normal")
+        prefer_bot = bool(pref.get("ai_plugin_reply_via_bot", True))
         delete_command = bool(pref.get("delete_command", True))
     ctx = get_command_context()
     self_id = getattr(ctx, "self_tg_user_id", None) if ctx is not None else None
@@ -342,6 +365,9 @@ async def plugin_inline_via_bot(
             return _fail("not_owner")
     except (TypeError, ValueError):
         return _fail("not_owner")
+    # 0.120.1：交互 Bot 就在这个群里时默认由 Bot 直接回复，不用账号代发（Bot 不在群里才代发）。
+    if prefer_bot and await _bot_in_chat(account_id, chat):
+        return _fail("bot_reply_preferred")
     ids_trusted = same_message_ids if same_message_ids is not None else chat <= _SUPERGROUP_MIN_ID
 
     def _id(value: Any) -> int | None:

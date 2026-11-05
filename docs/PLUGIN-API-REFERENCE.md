@@ -2997,7 +2997,7 @@ if via is not None and caps is not None and caps.has("messages.inline_via_bot"):
     # res["ok"] is False：什么都没发出，照原来的方式回复（reason 说明原因）
 ```
 
-- 返回 `{"ok", "inline_message_id", "message_id", "deleted_message", "reason"}`；常见 `reason`：`style_normal`（设置为普通）、`not_owner`、`no_interaction_bot`、`bot_inline_disabled`（BotFather 没开 `/setinline`）、`chat_send_inline_forbidden`（群禁止 inline bot）、`chosen_inline_result_timeout`（8 秒内没收到回执，多半没开 `/setinlinefeedback`，已发的占位会被删掉）。
+- 返回 `{"ok", "inline_message_id", "message_id", "deleted_message", "reason"}`；常见 `reason`：`style_normal`（设置为普通）、`not_owner`、`bot_reply_preferred`（0.120.1+：服务器参数「Bot 在群里时由 Bot 回复」开着且交互 Bot 就在这个群里，插件应照旧由 Bot 回复，不必记日志）、`no_interaction_bot`、`bot_inline_disabled`（BotFather 没开 `/setinline`）、`chat_send_inline_forbidden`（群禁止 inline bot）、`chosen_inline_result_timeout`（8 秒内没收到回执，多半没开 `/setinlinefeedback`，已发的占位会被删掉）。
 - `respect_setting=False` 可忽略「AI 回复方式」设置；交互 Bot 事件的 message_id 只在超级群 / 频道与 UserBot 一致，普通群默认不引用、不删除（`same_message_ids=True` 可显式声明一致）。
 - 占位带一个“AI 生成中…”按钮（没有按钮 Telegram 不给 `inline_message_id`）；最终编辑时不传 `reply_markup` 即去掉按钮。
 - 旧宿主没有这个方法 / 能力：插件不要提高 `min_telepilot_version`，探测不到就走原来的占位。

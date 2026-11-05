@@ -621,7 +621,7 @@ function jsonResponse(pathname: string): unknown | undefined {
     profiles: [],
   };
   if (pathname === "/api/system/resource-dashboard") return emptyResourceDashboard;
-  if (pathname === "/api/system/settings") return { timezone: "Asia/Shanghai", ai_reply_style: "normal", ai_inline_delete_command: true, login_security: {} };
+  if (pathname === "/api/system/settings") return { timezone: "Asia/Shanghai", ai_reply_style: "normal", ai_inline_delete_command: true, ...AI_REPLY_SETTINGS_FIXTURE, login_security: {} };
   if (pathname === "/api/system/settings/meta") return systemSettingsMetaFixture;
   if (pathname === "/api/system-agent/config") return {
     enabled: false, provider_id: null, model: null, fallback_provider_ids: [],
@@ -1084,3 +1084,14 @@ export async function installAgentAccountFixture(page: Page, options: AgentAccou
   await page.route((url) => /^\/api\/system-agent\/sessions\/[^/]+\/messages$/.test(url.pathname), (route) => fulfill(route, []));
   return state;
 }
+
+/** 0.120.1「AI › 回复排版与发送」：GET /api/system/settings 里 AI 回复相关开关的默认值。 */
+export const AI_REPLY_SETTINGS_FIXTURE = {
+  ai_plugin_reply_via_bot: true,
+  ai_stream_edit: false,
+  ai_layout_divider_before: true,
+  ai_layout_divider_after: true,
+  ai_native_divider: true,
+  ai_inline_ask_enabled: true,
+  ai_inline_ask_show_question: true,
+};

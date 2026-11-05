@@ -264,7 +264,11 @@ def layout_with_dividers(parts: list[str], answer_marker: str, *, before: bool =
     if answer_marker in parts:
         index = parts.index(answer_marker)
         if before and index > 0 and parts[index - 1] != DIVIDER:
-            parts.insert(index, DIVIDER)
+            # 0.120.1：回答上面是「引用块 + 标题行（如 ✨ AI 回答）」时，分割线紧跟在引用下面
+            # （引用 → 分割线 → 标题 → 回答），不夹在标题和回答之间。
+            anchor = _quote_anchor(parts, index)
+            at = anchor + 1 if anchor is not None else index
+            parts.insert(at, DIVIDER)
             index += 1
         if after and index < len(parts) - 1 and parts[index + 1] != DIVIDER:
             parts.insert(index + 1, DIVIDER)
@@ -276,6 +280,20 @@ def layout_with_dividers(parts: list[str], answer_marker: str, *, before: bool =
     while out and out[-1] == DIVIDER:
         out.pop()
     return out
+
+
+def _quote_anchor(parts: list[str], index: int) -> int | None:
+    """回答前最近的引用块位置；引用和回答之间只有普通段落（标题）且没有分割线时返回它，否则 None。"""
+
+    for pos in range(index - 1, -1, -1):
+        item = parts[pos]
+        if item == DIVIDER:
+            return None
+        if item.lstrip().startswith(">"):
+            return pos if pos < index - 1 else None
+        if item in (_ANSWER_BLOCK, _ANSWER_INLINE) or "\n\n" in item or len(_plain(item)) > 60:
+            return None
+    return None
 
 
 def render_template_rich_markdown(
@@ -340,6 +358,27 @@ _S_FIRST = "\u0001TPA1\u0001"
 _S_REST = "\u0001TPA2\u0001"
 
 
+_QUOTE_THEN_MARK_RE = re.compile(
+    "(</blockquote>)[ \t]*(" + "|".join(re.escape(m) for m in (_S_ANSWER, _S_FIRST)) + ")", re.IGNORECASE
+)
+
+
+def _text_quote_anchor(lines: list[str], first: int) -> int | None:
+    """回答前最近一个以 ``</blockquote>`` 结尾的行；中间只有短标题行（无分割线）时返回它的行号。"""
+
+    for pos in range(first - 1, -1, -1):
+        line = lines[pos].strip()
+        if not line:
+            continue
+        if is_divider_line(_plain(line)):
+            return None
+        if line.lower().endswith("</blockquote>"):
+            return pos if any(lines[i].strip() for i in range(pos + 1, first)) else None
+        if "<blockquote" in line.lower() or len(_plain(line)) > 60:
+            return None
+    return None
+
+
 def render_template_text_layout(
     template: str,
     ctx: dict[str, Any],
@@ -364,6 +403,10 @@ def render_template_text_layout(
     marked["answer_first_2"] = _S_FIRST
     marked["answer_rest"] = _S_REST if str(real.get("answer_rest") or "").strip() else ""
     rendered = render_output(template, marked, escape_format=escape_format)
+    if divider_before:
+        # 模板写成 ``<blockquote>{question}</blockquote>{answer}``（Telegram 里引用块后自动换行）时，
+        # 把回答拆到下一行，才能在引用和回答之间补分割线（0.120.1）。
+        rendered = _QUOTE_THEN_MARK_RE.sub(lambda m: f"{m.group(1)}\n{m.group(2)}", rendered, count=1)
     lines = rendered.split("\n")
     hits = [i for i, line in enumerate(lines) if any(mark in line for mark in (_S_ANSWER, _S_FIRST, _S_REST))]
     def alone(line: str) -> bool:
@@ -379,7 +422,8 @@ def render_template_text_layout(
             lines.insert(last + 1, TEXT_DIVIDER)
         before = next((i for i in range(first - 1, -1, -1) if lines[i].strip()), None)
         if divider_before and before is not None and not is_divider_line(_plain(lines[before])):
-            lines.insert(first, TEXT_DIVIDER)
+            anchor = _text_quote_anchor(lines, first)
+            lines.insert(anchor + 1 if anchor is not None else first, TEXT_DIVIDER)
     body = "\n".join(lines)
     body = body.replace(_S_ANSWER, real.get("answer", "")).replace(_S_FIRST, real.get("answer_first_2", ""))
     return body.replace(_S_REST, real.get("answer_rest", ""))

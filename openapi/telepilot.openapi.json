@@ -24068,6 +24068,18 @@
             "description": "回答是富文本时（inline 代发、原消息富文本编辑），分割线用 Telegram 自带的那种细横线，模板和回答里手打的整行横线也会换成它。关掉则用一整行「━━━」文字。普通回复不支持原生分割线，始终是整行「━」。",
             "title": "用原生分割线 · ai_native_divider"
           },
+          "ai_plugin_reply_via_bot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "AI 答疑插件被关键词或 @Bot 触发时（包括你自己触发），交互 Bot 就在这个群里就由 Bot 直接回复那条消息；Bot 不在群里才借你的账号代发。关掉则在「AI 回复方式」= inline 代发时照旧用你的账号发“你 via @Bot”并删掉提问消息。",
+            "title": "Bot 在群里时由 Bot 回复 · ai_plugin_reply_via_bot"
+          },
           "ai_reply_style": {
             "anyOf": [
               {
@@ -24344,7 +24356,7 @@
   },
   "info": {
     "title": "TelePilot",
-    "version": "0.120.0-beta.2"
+    "version": "0.120.0-beta.3"
   },
   "openapi": "3.1.0",
   "paths": {
