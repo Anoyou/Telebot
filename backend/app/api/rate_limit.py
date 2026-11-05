@@ -656,6 +656,10 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
     ai_inline_delete_command = inline_ai_relay.normalize_delete_command(
         await _get_setting(db, "ai_inline_delete_command", None)
     )
+    ai_layout_switches = {
+        key: inline_ai_relay.normalize_switch(await _get_setting(db, key, None), default)
+        for key, default in inline_ai_relay.AI_LAYOUT_SWITCHES.items()
+    }
     tz = str(tz_val.get("value", "")) if isinstance(tz_val, dict) else str(tz_val)
     llm_limits = llm_val if isinstance(llm_val, dict) else {}
     payout_limits = payout_val if isinstance(payout_val, dict) else {}
@@ -695,6 +699,7 @@ async def get_system_settings(db: DBSession, _user: CurrentUser) -> dict[str, An
         "ai_context_messages": ai_context_messages,
         "ai_reply_style": ai_reply_style,
         "ai_inline_delete_command": ai_inline_delete_command,
+        **ai_layout_switches,
         "login_security": auth_login_security.login_security_config_to_dict(login_security),
         "llm_limits": {
             "per_minute": max(0, int(llm_limits.get("per_minute", 0) or 0)),
@@ -908,8 +913,13 @@ class _SettingsPatch(BaseModel):
     command_prefix_required: bool | None = _meta_field("command_prefix_required")
     command_echo_guard_previous_messages: int | None = _meta_field("command_echo_guard_previous_messages")
     ai_context_messages: int | None = _meta_field("ai_context_messages")
-    ai_reply_style: Literal["normal", "inline"] | None = _meta_field("ai_reply_style")
+    ai_reply_style: Literal["normal", "edit_rich", "inline"] | None = _meta_field("ai_reply_style")
     ai_inline_delete_command: bool | None = _meta_field("ai_inline_delete_command")
+    ai_layout_divider_before: bool | None = _meta_field("ai_layout_divider_before")
+    ai_layout_divider_after: bool | None = _meta_field("ai_layout_divider_after")
+    ai_native_divider: bool | None = _meta_field("ai_native_divider")
+    ai_inline_ask_enabled: bool | None = _meta_field("ai_inline_ask_enabled")
+    ai_inline_ask_show_question: bool | None = _meta_field("ai_inline_ask_show_question")
     login_security: _LoginSecurityPatch | None = Field(default=None, title=_meta_group_title("login_security"))
     remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = Field(default=None, title=_meta_group_title("remote_plugin_update_check"))
     app_update_target: _AppUpdateTargetPatch | None = Field(default=None, title=_meta_group_title("app_update_target"))
@@ -1121,6 +1131,13 @@ async def patch_system_settings(payload: _SettingsPatch, db: DBSession, user: Cu
         enabled = bool(payload.ai_inline_delete_command)
         await _set_setting(db, "ai_inline_delete_command", {"enabled": enabled})
         await _audit(db, user.id, "set_ai_inline_delete_command", target="system", detail={"enabled": enabled})
+    from ..services import inline_ai_relay as _relay
+
+    for key in _relay.AI_LAYOUT_SWITCHES:
+        value = getattr(payload, key, None)
+        if value is not None:
+            await _set_setting(db, key, {"enabled": bool(value)})
+            await _audit(db, user.id, f"set_{key}", target="system", detail={"enabled": bool(value)})
     if payload.llm_limits is not None:
         current = await _get_setting(db, "llm_limits", {})
         if not isinstance(current, dict):

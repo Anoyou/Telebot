@@ -99,6 +99,58 @@ def apply_table_style_defaults(rich_message: Any) -> Any:
     return out
 
 
+# 分割线（0.119.1）：Rich Markdown 的 ``---``（及 ``***`` / ``___``）就是官方原生分割线
+# InputRichBlockDivider（HTML ``<hr/>``）。模型常把分隔写成整行「———」「────」「━━━」，
+# 这些在 Rich Message 里只是普通文字；另外 ``---`` 紧跟在文字行下面时 GFM 会把上一行
+# 当成二级标题（setext）。生成方（,ai 模板渲染等）按「用原生分割线」开关调用
+# :func:`normalize_markdown_dividers` 把整行横线改成前后空行的 ``---``；代码块内不动。
+DIVIDER_LINE_RE = re.compile(
+    r"^[ \t]{0,3}(?:"
+    r"(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}"
+    r"|([━─—―═╌╍┄┅┈┉⎯▬])(?:[ \t]*\1){2,}"
+    r")[ \t]*$"
+)
+
+
+def is_divider_line(line: str) -> bool:
+    """整行只有横线（``---`` / ``***`` / ``___`` 或 3 个以上同一种 ━ ─ — ═ 等）时为 True。"""
+
+    return bool(DIVIDER_LINE_RE.match(str(line or "")))
+
+
+def normalize_markdown_dividers(text: str) -> str:
+    """把 Rich Markdown 里的整行横线统一成原生分割线 ``---``（前后各留一个空行）。"""
+
+    if not text or not any(ch in text for ch in "-*_━─—―═╌╍┄┅┈┉⎯▬"):
+        return text
+    lines = text.split("\n")
+    out: list[str] = []
+    fence: str | None = None
+    for line in lines:
+        fence_match = _FENCE_RE.match(line)
+        if fence is not None:
+            out.append(line)
+            if fence_match and fence_match.group(1)[0] == fence[0] and len(fence_match.group(1)) >= len(fence):
+                fence = None
+            continue
+        if fence_match:
+            fence = fence_match.group(1)
+            out.append(line)
+            continue
+        if is_divider_line(line):
+            if out and out[-1].strip():
+                out.append("")
+            out.append("---")
+            out.append("")
+            continue
+        if out and out[-1] == "" and not line.strip() and len(out) >= 2 and out[-2] == "---":
+            continue  # 分割线后原本就有空行：不再叠加
+        out.append(line)
+    while out and out[-1] == "" and lines and lines[-1] != "":
+        out.pop()
+    return "\n".join(out)
+
+
 def apply_table_style(
     rich_message: Any,
     *,

@@ -25,6 +25,15 @@
 
 ## [Unreleased]
 
+## [0.120.0-beta.1] - 2026-11-05 · minor（次版本预发布） · inline 提问与 AI 回答排版
+
+- 修复交互 Bot 开了 inline 模式（`/setinline`）后，群里输入「@交互Bot 问题」一直转圈发不出去：插件都没回答这条 inline 查询时，平台回一条「发送这个问题」（描述是问题预览）；点选后以「用户名 via @交互Bot」发出问题，再走原来的访客 AI 答疑链路（同一个 AI 答疑插件、同一套会话 / 用户白名单、每日限额与访客限流），把回答编辑进这条消息，顶部保留问题引用。查询为空给一条用法提示；访客消息开关关闭、没有处理访客消息的插件或触发限流时回空结果（短缓存）；插件没回答（不在许可范围等）时把消息改成「没有拿到回答」，不留转圈占位。inline 查询不带群 id，插件设了会话白名单时按现有规则不回答。需要在 @BotFather 给交互 Bot 打开 `/setinlinefeedback`（Enabled）。
+- 修复 `,ai` inline 代发的富文本排版乱掉：0.119.0 把按 Telegram HTML 写的输出模板直接当 Rich Markdown 发，单换行被并成一行（手打横线和署名挤在一起）、`<blockquote>` 里的回答（表格 / 标题 / 列表）不被解析。现在模板按字面渲染（换行保留、`<blockquote>` 转成引用块、整行横线转成原生分割线），回答作为完整 Markdown 放回原位。
+- 新增回答排版（用户指定）：引用（被回复消息 / 问题）→ 分割线 → 回答 → 分割线 → 署名。富文本（inline 代发、原消息富文本编辑、inline 提问）用 Telegram 原生分割线（`InputRichBlockDivider`，Rich Markdown `---`），模型和模板里手打的整行「———」「────」「━━━」也换成原生分割线（代码块内不动，也避免 `---` 紧跟文字被当成标题）；普通回复（Telegram HTML 没有分割线）用单独一行「━━━━━━━━━━━━」，模板里已有分割线就不重复加。
+- 「AI 回复方式」新增「在原消息上编辑（富文本，需 Premium）」：UserBot 用 MTProto `messages.editMessage(rich_message)` 把自己的指令消息直接编辑成原生富文本（与交互 Bot 同一种 InputRichMessage，支持原生分割线、表格、标题）；账号不是 Premium、服务器不允许或 Telegram 拒绝时自动改用普通编辑，不报错。
+- 新增服务器参数开关（「指令」组，Web 服务器设置与 App「全部服务器参数」都能找到，默认都开）：回答前加分割线、署名前加分割线、用原生分割线、响应 @Bot inline 提问、inline 提问显示问题。
+- 说明：原消息编辑的分段流式输出不在本版，后续单独提交。
+
 ## [0.119.0-beta.1] - 2026-11-04 · minor（次版本预发布） · AI 回复 inline 代发
 
 - 新增「AI 回复方式」：`普通`（默认，和以前一样直接把指令消息改成回答）/ `inline 代发`。选 inline 代发后，账号本人发 `,ai 问题` 时 UserBot 通过本账号绑定的交互 Bot 的 inline 模式（GetInlineBotResults + SendInlineBotResult，`hide_via=False`，引用被回复的消息）发出一条「用户名 via @交互Bot」的占位，再由交互 Bot 用 `editMessageText(inline_message_id, rich_message)` 编辑成富文本答案（表格沿用紧凑 + 边框 + 斑马纹，Rich 被拒退回 HTML、再退纯文本），非 Premium 账号也能看到原生表格。

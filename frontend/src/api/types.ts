@@ -1055,9 +1055,19 @@ export interface SystemSettings {
   /** ,ai 携带的最近聊天消息条数；0 = 不带上下文 */
   ai_context_messages?: number;
   /** AI 指令回复方式：normal = 直接编辑指令消息；inline = 借交互 Bot inline 代发富文本 */
-  ai_reply_style?: "normal" | "inline";
+  ai_reply_style?: "normal" | "edit_rich" | "inline";
   /** inline 代发成功后是否删除原指令消息；默认 true */
   ai_inline_delete_command?: boolean;
+  /** 回答排版：引用 / 标题与回答之间加分割线；默认 true */
+  ai_layout_divider_before?: boolean;
+  /** 回答排版：回答与署名之间加分割线；默认 true */
+  ai_layout_divider_after?: boolean;
+  /** 富文本回答用原生分割线；默认 true */
+  ai_native_divider?: boolean;
+  /** 响应「@交互Bot 问题」inline 提问；默认 true */
+  ai_inline_ask_enabled?: boolean;
+  /** inline 提问回答顶部显示问题；默认 true */
+  ai_inline_ask_show_question?: boolean;
   /** IANA 时区标识，如 "Asia/Shanghai"；默认 Asia/Shanghai */
   timezone?: string;
   remote_plugin_update_check?: {

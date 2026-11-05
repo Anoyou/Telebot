@@ -105,6 +105,43 @@ function getGuideStepByPath(pathname: string, search: string): number {
 
 export type SettingsTab = "account" | "platform" | "connections" | "security" | "migration" | "interface";
 
+type AiReplyStyle = "normal" | "edit_rich" | "inline";
+type AiLayoutSwitchKey =
+  | "ai_layout_divider_before"
+  | "ai_layout_divider_after"
+  | "ai_native_divider"
+  | "ai_inline_ask_enabled"
+  | "ai_inline_ask_show_question";
+
+const AI_LAYOUT_SWITCH_DEFAULTS: Record<AiLayoutSwitchKey, boolean> = {
+  ai_layout_divider_before: true,
+  ai_layout_divider_after: true,
+  ai_native_divider: true,
+  ai_inline_ask_enabled: true,
+  ai_inline_ask_show_question: true,
+};
+
+const AI_LAYOUT_SWITCH_ITEMS: { key: AiLayoutSwitchKey; label: string; hint: string }[] = [
+  { key: "ai_layout_divider_before", label: "回答前加分割线", hint: "回答上面有引用（被回复的消息、问题）或标题时，中间自动加一条分割线；模板里已有就不重复。" },
+  { key: "ai_layout_divider_after", label: "署名前加分割线", hint: "回答下面有署名、模型信息或来源时，中间加一条分割线，署名单独成一段。" },
+  { key: "ai_native_divider", label: "用原生分割线", hint: "富文本回答里用 Telegram 自带的细横线，手打的整行横线也换成它；关掉则用一整行「━━━」。普通回复始终是整行「━」。" },
+  { key: "ai_inline_ask_enabled", label: "响应 @Bot inline 提问", hint: "交互 Bot 开了 inline 模式后，群友输入「@交互Bot 问题」会弹出「发送这个问题」，点了 AI 就把回答写进这条消息。关掉则不弹出（输入框会一直转圈）。" },
+  { key: "ai_inline_ask_show_question", label: "inline 提问显示问题", hint: "inline 提问的回答顶部用引用块显示原来的问题；关掉只显示回答。" },
+];
+
+function normalizeAiReplyStyle(value: unknown): AiReplyStyle {
+  return value === "inline" || value === "edit_rich" ? value : "normal";
+}
+
+function readAiLayoutSwitches(data: Partial<Record<AiLayoutSwitchKey, boolean | undefined>>): Record<AiLayoutSwitchKey, boolean> {
+  const out = { ...AI_LAYOUT_SWITCH_DEFAULTS };
+  for (const key of Object.keys(out) as AiLayoutSwitchKey[]) {
+    const value = data[key];
+    if (typeof value === "boolean") out[key] = value;
+  }
+  return out;
+}
+
 /** 服务器设置 ?tab= → 分页。包含第 20 轮之前的旧值（proxy-identity / backup / rate …）。 */
 export function resolveSettingsTab(raw: string | null): SettingsTab | null {
   switch (raw) {
@@ -175,8 +212,9 @@ export function SettingsIndex() {
 
   const [prefix, setPrefix] = useState("");
   const [aiContextMessages, setAiContextMessages] = useState("0");
-  const [aiReplyStyle, setAiReplyStyle] = useState<"normal" | "inline">("normal");
+  const [aiReplyStyle, setAiReplyStyle] = useState<AiReplyStyle>("normal");
   const [aiInlineDeleteCommand, setAiInlineDeleteCommand] = useState(true);
+  const [aiLayoutSwitches, setAiLayoutSwitches] = useState<Record<AiLayoutSwitchKey, boolean>>(AI_LAYOUT_SWITCH_DEFAULTS);
   const [commandPrefixRequired, setCommandPrefixRequired] = useState(true);
   const [aiEnabled, setAiEnabled] = useState(true);
   const [timezone, setTimezone] = useState("Asia/Shanghai");
@@ -209,8 +247,9 @@ export function SettingsIndex() {
     if (settingsQ.data) {
       setPrefix(settingsQ.data.command_prefix ?? ",");
       setAiContextMessages(String(settingsQ.data.ai_context_messages ?? 0));
-      setAiReplyStyle(settingsQ.data.ai_reply_style === "inline" ? "inline" : "normal");
+      setAiReplyStyle(normalizeAiReplyStyle(settingsQ.data.ai_reply_style));
       setAiInlineDeleteCommand(settingsQ.data.ai_inline_delete_command ?? true);
+      setAiLayoutSwitches(readAiLayoutSwitches(settingsQ.data));
       setCommandPrefixRequired(settingsQ.data.command_prefix_required ?? true);
       setAiEnabled(settingsQ.data.ai_enabled ?? true);
       setTimezone(settingsQ.data.timezone ?? "Asia/Shanghai");
@@ -287,11 +326,12 @@ export function SettingsIndex() {
   });
 
   const saveAiReply = useMutation({
-    mutationFn: (patch: { ai_reply_style?: "normal" | "inline"; ai_inline_delete_command?: boolean }) =>
+    mutationFn: (patch: { ai_reply_style?: AiReplyStyle; ai_inline_delete_command?: boolean } & Partial<Record<AiLayoutSwitchKey, boolean>>) =>
       patchSystemSettings(patch),
     onSuccess: (data) => {
-      setAiReplyStyle(data.ai_reply_style === "inline" ? "inline" : "normal");
+      setAiReplyStyle(normalizeAiReplyStyle(data.ai_reply_style));
       setAiInlineDeleteCommand(data.ai_inline_delete_command ?? true);
+      setAiLayoutSwitches(readAiLayoutSwitches(data));
       toast.success("AI 回复方式已保存，下一条 AI 指令生效");
       qc.invalidateQueries({ queryKey: ["system", "settings"] });
     },
@@ -592,14 +632,18 @@ export function SettingsIndex() {
                     value={aiReplyStyle}
                     disabled={saveAiReply.isPending}
                     onChange={(e) => {
-                      const next = e.target.value === "inline" ? "inline" : "normal";
+                      const next = normalizeAiReplyStyle(e.target.value);
                       setAiReplyStyle(next);
                       saveAiReply.mutate({ ai_reply_style: next });
                     }}
                   >
                     <option value="normal">普通（直接把指令消息改成回答）</option>
+                    <option value="edit_rich">在原消息上编辑（富文本，需 Premium）</option>
                     <option value="inline">inline 代发（交互 Bot 富文本）</option>
                   </Select>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    在原消息上编辑（富文本）：和普通一样改你自己的指令消息，但用 Telegram 原生富文本（细分割线、表格、标题）；账号不是 Premium 或 Telegram 不接受时，自动改用普通格式，不会报错。
+                  </p>
                   <p className="text-xs leading-5 text-muted-foreground">
                     inline 代发：你发 AI 指令后，会出现一条“你的名字 via @交互Bot”的消息，由交互 Bot 编辑成带表格的富文本答案，非 Premium 也能用。
                     需要先在 @BotFather 给交互 Bot 执行 /setinline 和 /setinlinefeedback（选 Enabled）；群里禁止 inline、Bot 没开 inline 或等不到回执时，会自动改用普通回复。
@@ -616,6 +660,20 @@ export function SettingsIndex() {
                     onCheckedChange={(checked) => saveAiReply.mutate({ ai_inline_delete_command: checked })}
                   />
                 </div>
+                <p className="pt-1 text-xs leading-5 text-muted-foreground">回答排版：引用 → 分割线 → 回答 → 分割线 → 署名。下面的开关都能单独关掉。</p>
+                {AI_LAYOUT_SWITCH_ITEMS.map((item) => (
+                  <div key={item.key} className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium">{item.label}<ParamKey k={item.key} /></div>
+                      <p className="text-xs leading-5 text-muted-foreground">{item.hint}</p>
+                    </div>
+                    <Switch
+                      checked={aiLayoutSwitches[item.key]}
+                      disabled={saveAiReply.isPending}
+                      onCheckedChange={(checked) => saveAiReply.mutate({ [item.key]: checked })}
+                    />
+                  </div>
+                ))}
               </div>
               <div className="mt-4 flex max-w-xl items-start justify-between gap-4 rounded-md border bg-muted/20 px-3 py-3">
                 <div className="space-y-1">
