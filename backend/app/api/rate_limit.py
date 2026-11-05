@@ -920,6 +920,7 @@ class _SettingsPatch(BaseModel):
     ai_native_divider: bool | None = _meta_field("ai_native_divider")
     ai_inline_ask_enabled: bool | None = _meta_field("ai_inline_ask_enabled")
     ai_inline_ask_show_question: bool | None = _meta_field("ai_inline_ask_show_question")
+    ai_stream_edit: bool | None = _meta_field("ai_stream_edit")
     login_security: _LoginSecurityPatch | None = Field(default=None, title=_meta_group_title("login_security"))
     remote_plugin_update_check: _RemotePluginUpdateCheckPatch | None = Field(default=None, title=_meta_group_title("remote_plugin_update_check"))
     app_update_target: _AppUpdateTargetPatch | None = Field(default=None, title=_meta_group_title("app_update_target"))

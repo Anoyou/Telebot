@@ -14375,6 +14375,11 @@ export interface components {
              * @description 普通：直接把指令消息改成回答（普通格式，分割线用整行「━」代替）。在原消息上编辑（富文本）：同样改你自己的指令消息，但用 Telegram 原生富文本（原生分割线、表格、标题），需要本账号是 Telegram Premium，不满足时自动改用普通。inline 代发：借本账号的交互 Bot 发一条“你的名字 via @交互Bot”的消息，再由交互 Bot 编辑成富文本答案（表格、引用等，非 Premium 也能用）。需要在 @BotFather 给交互 Bot 打开 /setinline 和 /setinlinefeedback；群里禁止 inline、Bot 没开 inline 或超时会自动改用普通回复。排版统一为：引用 → 分割线 → 回答 → 分割线 → 署名。
              */
             ai_reply_style?: ("normal" | "edit_rich" | "inline") | null;
+            /**
+             * AI 回答分段流式输出 · ai_stream_edit
+             * @description AI 回复方式是「普通」或「在原消息上编辑（富文本）」时，回答不用等全部写完：每写好一段就先把这段改进你的指令消息，末尾显示「生成中」；全部写完后再一次改成完整排版（富文本不可用时自动用普通格式）。为了不被 Telegram 限流，私聊约 2 秒、群里约 3 秒才更新一次。模型不支持流式时自动按原来的方式一次性回答。默认关闭。
+             */
+            ai_stream_edit?: boolean | null;
             /** 服务器更新来源 · app_update_target */
             app_update_target?: components["schemas"]["_AppUpdateTargetPatch"] | null;
             /**

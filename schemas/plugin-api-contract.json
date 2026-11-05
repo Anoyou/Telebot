@@ -4294,6 +4294,16 @@
         ],
         "deprecated_in": null,
         "removed_in": null
+      },
+      {
+        "name": "messages.rich_divider",
+        "version": 1,
+        "since": "0.120.0-beta.2",
+        "plugin_api": "1.8",
+        "legacy_attr": null,
+        "facades": [],
+        "deprecated_in": null,
+        "removed_in": null
       }
     ],
     "ctx_capabilities_has": {
@@ -4315,6 +4325,7 @@
         "interaction.legacy_entry_keys",
         "manifest.min_version_prerelease",
         "manifest.plugin_api",
+        "messages.rich_divider",
         "middleware.delivered",
         "middleware.inbound",
         "middleware.outbound",
@@ -4359,6 +4370,7 @@
         "messages.guest_reply_markup",
         "messages.inline_rich_edit",
         "messages.render_profile",
+        "messages.rich_divider",
         "messages.rich_table_compact",
         "messages.rich_table_default_style",
         "messages.unified_ops",
@@ -4408,6 +4420,7 @@
         "messages.inline_via_bot",
         "messages.live_inline_edit",
         "messages.render_profile",
+        "messages.rich_divider",
         "messages.rich_table_compact",
         "messages.rich_table_default_style",
         "messages.streaming_edit",
@@ -4458,6 +4471,7 @@
         "messages.inline_via_bot",
         "messages.live_inline_edit",
         "messages.render_profile",
+        "messages.rich_divider",
         "messages.rich_table_compact",
         "messages.rich_table_default_style",
         "messages.streaming_edit",

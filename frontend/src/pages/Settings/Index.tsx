@@ -111,7 +111,8 @@ type AiLayoutSwitchKey =
   | "ai_layout_divider_after"
   | "ai_native_divider"
   | "ai_inline_ask_enabled"
-  | "ai_inline_ask_show_question";
+  | "ai_inline_ask_show_question"
+  | "ai_stream_edit";
 
 const AI_LAYOUT_SWITCH_DEFAULTS: Record<AiLayoutSwitchKey, boolean> = {
   ai_layout_divider_before: true,
@@ -119,6 +120,7 @@ const AI_LAYOUT_SWITCH_DEFAULTS: Record<AiLayoutSwitchKey, boolean> = {
   ai_native_divider: true,
   ai_inline_ask_enabled: true,
   ai_inline_ask_show_question: true,
+  ai_stream_edit: false,
 };
 
 const AI_LAYOUT_SWITCH_ITEMS: { key: AiLayoutSwitchKey; label: string; hint: string }[] = [
@@ -127,6 +129,7 @@ const AI_LAYOUT_SWITCH_ITEMS: { key: AiLayoutSwitchKey; label: string; hint: str
   { key: "ai_native_divider", label: "用原生分割线", hint: "富文本回答里用 Telegram 自带的细横线，手打的整行横线也换成它；关掉则用一整行「━━━」。普通回复始终是整行「━」。" },
   { key: "ai_inline_ask_enabled", label: "响应 @Bot inline 提问", hint: "交互 Bot 开了 inline 模式后，群友输入「@交互Bot 问题」会弹出「发送这个问题」，点了 AI 就把回答写进这条消息。关掉则不弹出（输入框会一直转圈）。" },
   { key: "ai_inline_ask_show_question", label: "inline 提问显示问题", hint: "inline 提问的回答顶部用引用块显示原来的问题；关掉只显示回答。" },
+  { key: "ai_stream_edit", label: "AI 回答分段流式输出", hint: "回复方式是「普通」或「在原消息上编辑（富文本）」时，每写好一段就先改进指令消息（末尾显示「生成中」），写完再一次改成完整排版。私聊约 2 秒、群里约 3 秒更新一次；模型不支持流式时照旧一次性回答。默认关。" },
 ];
 
 function normalizeAiReplyStyle(value: unknown): AiReplyStyle {

@@ -455,6 +455,117 @@ async def _call_llm_provider(
         return None
 
 
+_STREAM_ABORTED = object()
+
+
+def _fallback_provider_id_for(cfg: dict[str, Any], routing_mode: str, provider_id: Any) -> int | None:
+    raw = cfg.get("routing_fallback_provider_id")
+    if routing_mode == "auto":
+        raw = raw or provider_id
+    try:
+        return int(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def _maybe_stream_llm_into_message(
+    *,
+    event: Any,
+    cfg: dict[str, Any],
+    tpl: dict[str, Any],
+    account_id: int,
+    triggered_by_account_id: int | None,
+    ctx_providers: dict[int, dict[str, Any]],
+    provider_dto: Any,
+    provider_dtos: dict[int, Any],
+    provider_dict: dict[str, Any],
+    request_settings: Any,
+    user_msg: str,
+    command_mode: str,
+    inline_handle: Any,
+    native_image_mode: bool,
+    has_images: bool,
+    has_self_image: bool,
+    has_self_audio: bool,
+    routing_mode: str,
+    provider_id: Any,
+    routing_matched_tag: str | None,
+    routing_note: str | None,
+) -> Any:
+    """开关「AI 回答分段流式输出」打开时边生成边按段落编辑指令消息（见 ``ai_stream_edit``）。
+
+    返回 ``_LLMCallOutcome``（流式拿到完整回答，之后照旧一次最终排版）、``None``（未开启 / 不适用 /
+    第一段显示前就失败，调用方改走一次性调用）或 ``_STREAM_ABORTED``（显示过内容后失败，错误已写回消息）。
+    """
+
+    from . import ai_stream_edit
+
+    try:
+        from ..services import inline_ai_relay
+
+        pref = await inline_ai_relay.read_reply_preference()
+    except Exception:  # noqa: BLE001
+        return None
+    if not ai_stream_edit.stream_edit_eligible(
+        pref=pref,
+        event=event,
+        cfg=cfg,
+        command_mode=command_mode,
+        inline_handle=inline_handle,
+        native_image_mode=native_image_mode,
+        has_images=has_images,
+        has_self_image=has_self_image,
+        has_self_audio=has_self_audio,
+    ):
+        return None
+    web_search = bool(cfg.get("web_search", False))
+    message_id = getattr(getattr(event, "message", None), "id", "") or id(event)
+    try:
+        streamed = await ai_stream_edit.stream_answer_into_message(
+            event,
+            provider_dto=provider_dto,
+            provider_dtos=provider_dtos,
+            system=request_settings.system,
+            user_msg=user_msg,
+            override_model=request_settings.override_model,
+            routed_model=getattr(request_settings, "routed_model", None),
+            max_tokens=request_settings.max_tokens,
+            temperature=request_settings.temperature,
+            reasoning_effort=request_settings.reasoning_effort,
+            timeout_seconds=request_settings.timeout_seconds,
+            web_search=web_search,
+            web_search_context_size=str(cfg.get("web_search_context_size") or "medium"),
+            account_id=account_id,
+            triggered_by_account_id=triggered_by_account_id,
+            source=f"command:{tpl.get('name') or 'ai'}",
+            fallback_provider_id=_fallback_provider_id_for(cfg, routing_mode, provider_id),
+            matched_tag=routing_matched_tag,
+            runtime_metadata=build_runtime_metadata(
+                session_id=f"cmdai:{account_id}:{getattr(event, 'chat_id', '')}",
+                run_id=f"cmdai-run:{message_id}",
+                turn_id=f"cmdai-turn:{message_id}",
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        log.warning("[ai-stream] unexpected stream error; using one-shot call", exc_info=True)
+        return None
+    if streamed.failed:
+        return _STREAM_ABORTED
+    if streamed.result is None:
+        return None
+    used = streamed.used_provider
+    if used is not None and getattr(used, "id", None) != getattr(provider_dto, "id", None):
+        provider_dict = ctx_providers.get(used.id) or used.to_dict()
+        fb_note = f"fallback → @{used.name or used.id}"
+        routing_note = f"{routing_note} · {fb_note}" if routing_note else fb_note
+    return _LLMCallOutcome(
+        result=streamed.result,
+        provider_dict=provider_dict,
+        routing_note=routing_note,
+        web_search=web_search,
+    )
+
+
 async def _deliver_generated_images_or_fallback_text(
     *,
     client: Any,
@@ -1484,7 +1595,7 @@ async def _invoke_impl(
     if context_count > 0:
         user_msg = await _append_ai_history(client, event, user_msg, context_count)
 
-    outcome = await _call_llm_provider(
+    outcome = await _maybe_stream_llm_into_message(
         event=event,
         cfg=cfg,
         tpl=tpl,
@@ -1494,25 +1605,51 @@ async def _invoke_impl(
         provider_dto=provider_dto,
         provider_dtos=provider_dtos,
         provider_dict=provider_dict,
-        system=request_settings.system,
+        request_settings=request_settings,
         user_msg=user_msg,
-        override_model=request_settings.override_model,
-        max_tokens=request_settings.max_tokens,
-        image_bytes_list=image_bytes_list,
+        command_mode=command_mode,
+        inline_handle=inline_handle,
         native_image_mode=native_image_mode,
+        has_images=bool(image_bytes_list),
+        has_self_image=has_self_image,
+        has_self_audio=has_self_audio,
         routing_mode=routing_mode,
         provider_id=provider_id,
         routing_matched_tag=routing_matched_tag,
         routing_note=routing_note,
-        temperature=request_settings.temperature,
-        reasoning_effort=request_settings.reasoning_effort,
-        timeout_seconds=request_settings.timeout_seconds,
-        runtime_metadata=build_runtime_metadata(
-            session_id=f"cmdai:{account_id}:{getattr(event, 'chat_id', '')}",
-            run_id=f"cmdai-run:{getattr(getattr(event, 'message', None), 'id', '') or id(event)}",
-            turn_id=f"cmdai-turn:{getattr(getattr(event, 'message', None), 'id', '') or id(event)}",
-        ),
     )
+    if outcome is _STREAM_ABORTED:
+        return
+    if outcome is None:
+        outcome = await _call_llm_provider(
+            event=event,
+            cfg=cfg,
+            tpl=tpl,
+            account_id=account_id,
+            triggered_by_account_id=triggered_by_account_id,
+            ctx_providers=ctx.providers,
+            provider_dto=provider_dto,
+            provider_dtos=provider_dtos,
+            provider_dict=provider_dict,
+            system=request_settings.system,
+            user_msg=user_msg,
+            override_model=request_settings.override_model,
+            max_tokens=request_settings.max_tokens,
+            image_bytes_list=image_bytes_list,
+            native_image_mode=native_image_mode,
+            routing_mode=routing_mode,
+            provider_id=provider_id,
+            routing_matched_tag=routing_matched_tag,
+            routing_note=routing_note,
+            temperature=request_settings.temperature,
+            reasoning_effort=request_settings.reasoning_effort,
+            timeout_seconds=request_settings.timeout_seconds,
+            runtime_metadata=build_runtime_metadata(
+                session_id=f"cmdai:{account_id}:{getattr(event, 'chat_id', '')}",
+                run_id=f"cmdai-run:{getattr(getattr(event, 'message', None), 'id', '') or id(event)}",
+                turn_id=f"cmdai-turn:{getattr(getattr(event, 'message', None), 'id', '') or id(event)}",
+            ),
+        )
     if outcome is None:
         return
     result = outcome.result

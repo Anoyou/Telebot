@@ -165,6 +165,12 @@ SETTINGS_META: list[dict[str, Any]] = [
        "inline 提问的回答顶部用引用块显示原来的问题。关掉则只显示回答。",
        "bool", "command", default=True,
        also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
+    _p("ai_stream_edit", "AI 回答分段流式输出",
+       "AI 回复方式是「普通」或「在原消息上编辑（富文本）」时，回答不用等全部写完：每写好一段就先把这段改进你的指令消息，"
+       "末尾显示「生成中」；全部写完后再一次改成完整排版（富文本不可用时自动用普通格式）。为了不被 Telegram 限流，"
+       "私聊约 2 秒、群里约 3 秒才更新一次。模型不支持流式时自动按原来的方式一次性回答。默认关闭。",
+       "bool", "command", default=False,
+       also_in=[_loc("服务器设置 › 平台与模块", web=_WEB_PLATFORM)]),
     _p("command_echo_guard_previous_messages", "命令回声防误触",
        "群里有人原样复读一条指令时，往前看这么多条消息，避免被复读误触发。0 = 关闭。",
        "integer", "command", default=8, unit="条", minimum=0, maximum=50, zero_means="关闭",
