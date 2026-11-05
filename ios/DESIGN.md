@@ -116,7 +116,7 @@
 | 插件 · 运行树（第 21 轮起只在插件页：`/plugins?view=tree` 直达；旧 `/settings?tab=` 为 tree／runtime／runtime-tree／platform-tree／capability-tree、`/platform-tree`、`/runtime-tree`、`/runtime`、`/plugins/tree`、`/plugins/runtime` 都跳到这里；组件 `pages/Plugins/PlatformTreeView.tsx`，原在 `pages/Settings/`） | 插件 ›「运行」（0.19.0）；0.29.0 删掉服务器设置里「运行树与运行模式（已移到 插件 › 运行）」跳转行；推送 `destination` 为 `runtime`／`runtime_tree`／`platform_tree` 时打开插件页 | ✅ 对齐（两端服务器设置里都不再有运行树） |
 | 插件「已安装」`/plugins/manage`（原「插件管理」）、「市场」`/plugins/market`（原「插件市场」），地址不变 | 插件 › 分段「市场」（0.29.0 由「发现」改名，插件市场入口在分段内）／「已安装」 | ✅ 同名 |
 | 消息模板实验室 `/plugins/message-template-lab` | 更多 › 指令与任务 › 模板预览与测试 › 消息模板实验室（原生，0.22.0） | ✅ 对齐（另有实时预览、格式检查、字数，见「Telegram 消息预览」） |
-| AI `/ai`（概览／供应商／用量）+ 存活检测 `/ai/liveness` | 更多 › 管理 › AI（可自选进 Dock） | ✅ 对齐 |
+| AI `/ai`（概览／供应商／用量／回复排版与发送 `?tab=reply`）+ 存活检测 `/ai/liveness` | 更多 › 管理 › AI（可自选进 Dock）；「回复排版与发送」= AI › AI 全局设置 › 「AI 回复排版与发送」分组（第 28 轮，iOS 同步做，见对应 iOS PR） | ✅ 对齐 |
 | 待确认 `/assistant/inbox`（第 20 轮第二批起不再是侧栏一级：挂在侧栏 Agent 行、桌面小宠物、手机底栏 Agent 圆钮的红点上，Agent 页右上角「待确认」进入；地址不变） | Agent 角标 + 待确认页 | ✅ 对齐（两端都挂在 Agent 上） |
 | Agent `/assistant`（第 20 轮前 Web 叫「系统助手」） | Dock 独立「Agent」 | ✅ 对齐 |
 | 账号详情页头、插件页账号行「问 Agent」（第 20 轮，`?agent_account=ID&agent_from=…`；在 `/accounts/:aid` 或插件页直接打开 Agent 也带入该账号） | 账号详情页头、插件页「启用与配置」所选账号行的「问 Agent」（`sparkles`，`.bordered`），插件详情页放在导航栏（与收藏并排，只显示图标，不占列表行；iOS 0.31.0）：切到 Agent 标签页，`AssistantStore.ask` 用 `createSession(model, accountID:)` 新建关联该账号的会话并提示来源；插件详情把「关于插件「名称」（key）：」预填进输入栏 | ✅ 对齐（第 22 轮）。差异：iOS 立即新建会话（当前会话已是同一账号且无消息时复用），Web 是发送时才建的草稿；iOS 插件详情多预填插件名；Agent 是独立标签页，iOS 不做「在账号页直接点 Agent 标签也带入账号」。服务器关闭 AI 模块时隐藏入口 |

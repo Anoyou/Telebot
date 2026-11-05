@@ -11,6 +11,7 @@ import {
   FileText,
   History,
   LayoutDashboard,
+  MessageSquareText,
   Package,
   Pencil,
   Power,
@@ -54,11 +55,12 @@ function LLMProvidersFallback() {
   );
 }
 import { RecentUsageContent } from "@/pages/AI/_components/RecentUsage";
+import { AiReplySettings } from "@/pages/AI/_components/AiReplySettings";
 import { confirmDialog } from "@/components/ui/confirm-dialog";
 
-type AITab = "overview" | "providers" | "usage";
+type AITab = "overview" | "providers" | "usage" | "reply";
 
-const AI_TABS = new Set<AITab>(["overview", "providers", "usage"]);
+const AI_TABS = new Set<AITab>(["overview", "providers", "usage", "reply"]);
 
 function normalizeTab(tab: string | null): AITab {
   return tab && AI_TABS.has(tab as AITab) ? (tab as AITab) : "overview";
@@ -278,6 +280,21 @@ export function AIIndex() {
         <Suspense fallback={<LLMProvidersFallback />}>
           <LLMProviders />
         </Suspense>
+      </PageShell>
+    );
+  }
+
+  if (activeTab === "reply") {
+    return (
+      <PageShell>
+        <AIHeader />
+        <Subnav
+          activeTab={activeTab}
+          helpOpen={helpOpen}
+          onHelpOpenChange={setHelpMenuOpen}
+          cmdPrefix={cmdPrefix}
+        />
+        <AiReplySettings />
       </PageShell>
     );
   }
@@ -610,6 +627,10 @@ function Subnav({
           <TabsTrigger value="usage" className="gap-1.5">
             <History className="h-4 w-4" />
             近期调用
+          </TabsTrigger>
+          <TabsTrigger value="reply" className="gap-1.5">
+            <MessageSquareText className="h-4 w-4" />
+            回复排版与发送
           </TabsTrigger>
         </TabsList>
       </Tabs>

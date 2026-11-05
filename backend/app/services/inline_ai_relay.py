@@ -293,6 +293,9 @@ AI_LAYOUT_SWITCHES: dict[str, bool] = {
     "ai_inline_ask_enabled": True,  # 响应「@交互Bot 问题」的 inline 查询
     "ai_inline_ask_show_question": True,  # inline 提问的回答顶部显示问题引用
     "ai_stream_edit": False,  # 「在原消息上编辑」时边生成边按段落编辑（0.120.0-beta.2，默认关）
+    # 0.120.1：插件（AI 答疑关键词 / @Bot）在交互 Bot 所在的群里被账号本人触发时由 Bot 直接回复，
+    # 不走 inline 代发（关掉恢复旧行为：AI 回复方式 = inline 代发时用账号发「你 via @Bot」）。
+    "ai_plugin_reply_via_bot": True,
 }
 _PREF_CACHE: tuple[float, dict[str, Any]] | None = None
 _PREF_CACHE_SECONDS = 5.0
