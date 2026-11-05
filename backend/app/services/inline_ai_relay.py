@@ -292,6 +292,7 @@ AI_LAYOUT_SWITCHES: dict[str, bool] = {
     "ai_native_divider": True,  # 富文本时用 Telegram 原生分割线（关掉用整行「━」文字）
     "ai_inline_ask_enabled": True,  # 响应「@交互Bot 问题」的 inline 查询
     "ai_inline_ask_show_question": True,  # inline 提问的回答顶部显示问题引用
+    "ai_stream_edit": False,  # 「在原消息上编辑」时边生成边按段落编辑（0.120.0-beta.2，默认关）
 }
 _PREF_CACHE: tuple[float, dict[str, Any]] | None = None
 _PREF_CACHE_SECONDS = 5.0

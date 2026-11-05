@@ -1068,6 +1068,8 @@ export interface SystemSettings {
   ai_inline_ask_enabled?: boolean;
   /** inline 提问回答顶部显示问题；默认 true */
   ai_inline_ask_show_question?: boolean;
+  /** 「在原消息上编辑」时按段落流式编辑；默认 false */
+  ai_stream_edit?: boolean;
   /** IANA 时区标识，如 "Asia/Shanghai"；默认 Asia/Shanghai */
   timezone?: string;
   remote_plugin_update_check?: {
