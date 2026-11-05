@@ -32,11 +32,19 @@ RUN python -c 'import tomllib; from pathlib import Path; data = tomllib.loads(Pa
     > /spec/requirements.txt
 
 
+# cryptg 的源码包使用 Rust/PyO3；工具链仅供构建阶段使用，不进入运行镜像。
+# 保持目标架构，避免把构建机的 Rust 二进制复制到另一架构的 Python builder。
+FROM rust:1.99.1-slim AS rust-toolchain
+
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# 安装编译期依赖（cryptg/cffi 需要 gcc/libffi-dev）
+COPY --from=rust-toolchain /usr/local/cargo /usr/local/cargo
+COPY --from=rust-toolchain /usr/local/rustup /usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup PATH=/usr/local/cargo/bin:${PATH}
+
+# 安装 C/链接期依赖（cryptg/cffi 仍需要 gcc/libffi-dev）
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential gcc libffi-dev && \
     rm -rf /var/lib/apt/lists/*
@@ -48,7 +56,8 @@ RUN --mount=type=cache,target=/root/.cache/pip pip install --upgrade pip
 # （arm64 在 QEMU 里重装约 5 分钟）。
 COPY --from=deps-spec /spec/requirements.txt /tmp/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r /tmp/requirements.txt
+    pip install -r /tmp/requirements.txt && \
+    python -c "import cryptg; data = bytes(range(32)); key = bytes(range(32)); iv = bytes(range(32, 64)); assert cryptg.decrypt_ige(cryptg.encrypt_ige(data, key, iv), key, iv) == data"
 
 # 业务源码由 runtime 阶段直接复制到 /app。应用没有 console entry point，
 # 无需再构建一份重复 wheel 到 site-packages；后端代码变化因此不会打穿依赖层。
@@ -68,7 +77,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 从 builder 拷贝已安装的 Python 包与可执行入口（uvicorn/alembic 等都在这里）
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-RUN python -c "import importlib.metadata as m, pathlib, pip; d=list(pathlib.Path('/usr/local/lib/python3.12/site-packages').glob('pip-*.dist-info')); assert len(d) == 1, d; assert m.version('pip') == pip.__version__, (m.version('pip'), pip.__version__)"
+RUN python -c "import importlib.metadata as m, pathlib, pip, cryptg; d=list(pathlib.Path('/usr/local/lib/python3.12/site-packages').glob('pip-*.dist-info')); assert len(d) == 1, d; assert m.version('pip') == pip.__version__, (m.version('pip'), pip.__version__)"
 COPY --from=gateway-builder /out/telepilot-gateway /usr/local/bin/telepilot-gateway
 COPY gateway/LICENSE gateway/THIRD_PARTY_NOTICES.md /usr/share/licenses/telepilot-gateway/
 
