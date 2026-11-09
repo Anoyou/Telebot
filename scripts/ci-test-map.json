@@ -1,0 +1,81 @@
+{
+  "backend_smoke": [
+    "backend/app/tests/test_auth.py",
+    "backend/app/tests/test_openapi_contract.py"
+  ],
+  "browser_smoke": [
+    "frontend/tests/a11y/a11y.spec.ts",
+    "frontend/tests/visual/baseline.spec.ts"
+  ],
+  "ios_smoke": [
+    "TelePilotUITests/testOverviewAndAccountActions",
+    "TelePilotUITests/testNativeLoginChallenges",
+    "TelePilotUITests/testInterfaceLockCancelAndSuccess",
+    "WorkspaceUITests/testMoreSectionKeepsAccountsAndSettingsReachable",
+    "ManagementUITests/testAllSFSymbolNamesInSourcesExist"
+  ],
+  "browser": {
+    "frontend/src/pages/Ledger/index.tsx": [
+      "frontend/tests/visual/runtime-compat.spec.ts",
+      "frontend/tests/visual/web-ia2-r20.spec.ts",
+      "frontend/tests/visual/mobile-interactions.spec.ts"
+    ],
+    "frontend/src/pages/Webhooks/index.tsx": [
+      "frontend/tests/visual/secret-fields.spec.ts",
+      "frontend/tests/visual/web-ia-r20.spec.ts",
+      "frontend/tests/visual/web-ia2-r20.spec.ts"
+    ]
+  },
+  "ios": {
+    "ios/TelePilotApp/LedgerView.swift": [
+      "WorkspaceUITests/testDockKeepsPrimarySectionsAndAgentEntry",
+      "WorkspaceUITests/testDockCustomizationSwapsEntriesAndPersists",
+      "WorkspaceUITests/testDockFollowsServerPrimaryNavUntilCustomized",
+      "WorkspaceUITests/testDisabledModulesHideEntriesAndRefillDock",
+      "WorkspaceUITests/testSegmentedHeadersShareFrameAndAreNotClipped",
+      "WorkspaceUITests/testPageSearchUsesLeadingToolbarButton",
+      "TelePilotUITests/testGlobalSearchAndCustomizableOverview",
+      "ManagementUITests/testLedgerResetRequiresExactPhraseBeforeConfirmation",
+      "ManagementUITests/testLedgerShowsSummaryAndCharts",
+      "ManagementUITests/testRuntimeTreeSafeWatchAndModules",
+      "ManagementUITests/testRuntimeTreePluginGroupsAndNavigation",
+      "VisualInspectionUITests/testOperationsAndAssistantWorkspaces",
+      "TelePilotUITests/testOverviewCompactTilesFitFirstScreen"
+    ],
+    "ios/TelePilotApp/MessageTemplateLabView.swift": [
+      "WorkspaceUITests/testDockKeepsPrimarySectionsAndAgentEntry",
+      "WorkspaceUITests/testDockCustomizationSwapsEntriesAndPersists",
+      "WorkspaceUITests/testDockFollowsServerPrimaryNavUntilCustomized",
+      "WorkspaceUITests/testDisabledModulesHideEntriesAndRefillDock",
+      "WorkspaceUITests/testSegmentedHeadersShareFrameAndAreNotClipped",
+      "WorkspaceUITests/testPageSearchUsesLeadingToolbarButton",
+      "TelePilotUITests/testGlobalSearchAndCustomizableOverview",
+      "TelegramPreviewUITests/testInteractionQueryItemTemplatePreviewsEverywhere",
+      "TelegramPreviewUITests/testInteractionTemplatesShowLivePreviewAndFullEditor",
+      "TelegramPreviewUITests/testMessageTemplateLabLivePreviewRenderAndSend",
+      "TelegramPreviewUITests/testPluginTemplateFieldsPreviewWhileEditing"
+    ]
+  },
+  "ios_consumers": {
+    "ios/TelePilotApp/LedgerView.swift": [
+      "ios/TelePilotApp/ManagementView.swift",
+      "ios/TelePilotApp/OverviewView.swift",
+      "ios/TelePilotApp/TelePilotApp.swift"
+    ],
+    "ios/TelePilotApp/MessageTemplateLabView.swift": [
+      "ios/TelePilotApp/ManagementView.swift"
+    ]
+  },
+  "browser_suite_hash": "06d402fb9cedf74b6ff95502a42b98e0db4ece0b39dffb12b1c68fe245e5bad1",
+  "ios_suite_hash": "3ac0469ab72b10ce7db637fd0b29305008c3a4426096e2d9268848158c2e56fd",
+  "backend_fixture_hash": "c3c9f30785b8f273e675c248fc924af3754ca96459e0f90d12a61fbbca8935a4",
+  "backend_fixture_modules": [
+    "backend/app/services/account_bot_runtime.py",
+    "backend/app/services/bot_api_limits.py",
+    "backend/app/services/event_trace.py",
+    "backend/app/services/llm_reliability.py",
+    "backend/app/services/payment_sources.py",
+    "backend/app/services/polling_dispatcher.py",
+    "backend/app/worker/command.py"
+  ]
+}

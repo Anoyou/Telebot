@@ -317,6 +317,41 @@ final class AssistantUITests: XCTestCase {
         XCTAssertTrue(waitUntilGone(text))
     }
 
+    /// Streamed thinking must survive a tool draft reset and a final/history
+    /// packet without reasoning. This exercises the actual store handoff.
+    func testLiveReasoningSurvivesFinalHistoryRefresh() {
+        assertLiveReasoningHistory()
+    }
+
+    func testLiveReasoningSurvivesMissingFinalEvent() {
+        assertLiveReasoningHistory(["--ui-test-missing-final"])
+    }
+
+    private func assertLiveReasoningHistory(_ extra: [String] = []) {
+        let app = openAssistant(["--ui-test-live-reasoning"] + extra)
+        XCTAssertTrue(app.staticTexts["服务状态正常。这里是界面测试数据。"].waitForExistence(timeout: 15))
+        let composer = app.descendants(matching: .any)["assistant.composer"].firstMatch
+        composer.tap()
+        composer.typeText("请核对状态")
+        app.buttons["assistant.send"].tap()
+        XCTAssertTrue(app.staticTexts["核对完成，状态正常。"].waitForExistence(timeout: 25))
+        // The live reply is cleared only after the final history page was read.
+        XCTAssertTrue(waitUntilGone(app.descendants(matching: .any)["assistant.live"].firstMatch))
+        let toggle = app.buttons.matching(identifier: "assistant.reasoning.toggle").firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        XCTAssertEqual(toggle.value as? String, "已折叠")
+        XCTAssertTrue(toggle.label.hasPrefix("思考了"), toggle.label)
+        let dismiss = app.buttons["keyboard.dismiss"]
+        if dismiss.exists && dismiss.isHittable { dismiss.tap() }
+        for _ in 0..<3 where !toggle.isHittable { app.scrollViews.firstMatch.swipeDown() }
+        toggle.tap()
+        let text = app.staticTexts.matching(identifier: "assistant.reasoning.text").firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertEqual(text.label, "先核对账号，再检查配置；最后汇总结果。")
+        toggle.tap()
+        XCTAssertTrue(waitUntilGone(text))
+    }
+
     /// 第 24 轮：键盘上方统一的「收起」按钮（全 App 的输入框共用一条辅助工具栏）：点按收起键盘，草稿保留，
     /// 输入栏与发送按钮仍在键盘工具栏上方、可点。
     func testKeyboardDismissButtonHidesKeyboardAndKeepsDraft() {

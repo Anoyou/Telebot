@@ -327,16 +327,22 @@ async def run_agent(
             if stream_model_call is None:
                 return await model_call(current)
             terminal: ModelResponse | None = None
+            streamed_reasoning: list[str] = []
             async for event in stream_model_call(current):
                 if event.delta:
                     await _notify(callbacks.on_text_delta, event.delta)
                 if event.reasoning_delta:
+                    streamed_reasoning.append(event.reasoning_delta)
                     await _notify(callbacks.on_reasoning_delta, event.reasoning_delta)
                 if event.response is not None:
                     terminal = event.response
                     break
             if terminal is None:
                 raise RuntimeError("模型流式调用没有返回最终响应")
+            # Some compatible providers omit reasoning from the terminal packet.
+            # Keep the public deltas from this attempt, so history matches the stream.
+            if not terminal.reasoning_content and streamed_reasoning:
+                terminal = replace(terminal, reasoning_content="".join(streamed_reasoning))
             return terminal
 
     async def call(current: ModelRequest) -> ModelResponse:

@@ -29,10 +29,8 @@ concurrency:
   group: publish-images-${{ inputs.push && 'push' || 'check' }}-${{ inputs.ref_name || github.ref_name }}
   cancel-in-progress: true
 
-# 多架构构建提速（第十一轮）：QEMU 只用于目标架构的运行时层（apt / pip 依赖层有缓存时不再执行）。
-# - frontend：builder 固定 --platform=$BUILDPLATFORM，静态产物只在原生架构构建一次；
-# - web：Gateway 在原生架构交叉编译、不在镜像里跑 go test/vet（CI「Gateway」job 已跑）；依赖清单单独成层，
-#   版本号变化不再打穿 pip 依赖层；BUILD_COMMIT 只出现在最后一层。
+# 每个 service 在 AMD64 / ARM64 runner 原生构建，再按 digest 合并并证明最终 manifest。
+# artifact 用 run_id + service + arch 隔离；覆盖同一槽位支持仅重跑失败 job。
 
 jobs:
   scope:
@@ -69,19 +67,23 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   publish:
-    name: ${{ matrix.service }} 镜像
+    name: ${{ matrix.service }} / ${{ matrix.arch }} 镜像
     needs: scope
     if: needs.scope.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
-      id-token: write
-      attestations: write
     strategy:
       fail-fast: false
       matrix:
+        service: [web, frontend, updater]
+        arch: [amd64, arm64]
         include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
           - service: web
             dockerfile: backend/Dockerfile
           - service: frontend
@@ -101,55 +103,7 @@ jobs:
           REF_TYPE: ${{ needs.scope.outputs.ref_type }}
           REVISION: ${{ needs.scope.outputs.revision }}
           SERVICE: ${{ matrix.service }}
-        run: |
-          owner_lc="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
-          image="ghcr.io/${owner_lc}/telepilot-${SERVICE}"
-          version="$(python - <<'PY'
-          import re
-          from pathlib import Path
-          text = Path("backend/app/__init__.py").read_text()
-          print(re.search(r'__version__ = "([^"]+)"', text).group(1))
-          PY
-          )"
-          stable_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
-          prerelease_pattern='^[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc)\.[0-9]+$'
-          {
-            echo "image=$image"
-            echo "tags<<EOF"
-            echo "${image}:sha-${REVISION}"
-            if [[ "$REF_TYPE" == "tag" ]]; then
-              tag_version="${REF_NAME#v}"
-              if [[ "$tag_version" != "$version" ]]; then
-                echo "Tag ${REF_NAME} 与代码版本 ${version} 不一致" >&2
-                exit 1
-              fi
-              echo "${image}:${version}"
-              if [[ "$version" =~ $stable_pattern ]]; then
-                echo "${image}:stable"
-              elif [[ "$version" =~ $prerelease_pattern ]]; then
-                echo "${image}:beta"
-              else
-                echo "不支持的发布版本格式：${version}" >&2
-                exit 1
-              fi
-            elif [[ "$REF_NAME" == "main" ]]; then
-              if [[ ! "$version" =~ $stable_pattern ]]; then
-                echo "main 只允许稳定版本镜像，当前为 ${version}" >&2
-                exit 1
-              fi
-              echo "${image}:stable"
-            elif [[ "$REF_NAME" == "Beta" ]]; then
-              if [[ "$version" =~ $prerelease_pattern ]]; then
-                echo "${image}:beta"
-              elif [[ "$version" =~ $stable_pattern ]]; then
-                echo "Beta 正在同步稳定发布检查点，仅保留提交 SHA 标签" >&2
-              else
-                echo "不支持的 Beta 版本格式：${version}" >&2
-                exit 1
-              fi
-            fi
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+        run: bash scripts/ci-image-metadata.sh
 
       - name: 登录 GHCR
         if: inputs.push
@@ -159,35 +113,106 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 启用 QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
-
       - name: 启用 Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: 构建并推送多架构镜像
+      - name: 原生构建并按 digest 推送镜像
         id: push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: ${{ inputs.push }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ steps.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=${{ inputs.push }}
           pull: true
-          tags: ${{ steps.meta.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ needs.scope.outputs.revision }}
           build-args: |
             BUILD_COMMIT=${{ needs.scope.outputs.revision }}
-          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-from: |
+            type=gha,scope=${{ matrix.service }}-${{ matrix.arch }}
+            type=gha,scope=${{ matrix.service }}
           # 构建校验（PR）只读缓存，不写回，避免 PR 分支的层挤掉 Beta 的缓存。
-          cache-to: ${{ inputs.push && format('type=gha,mode=max,scope={0}', matrix.service) || '' }}
+          cache-to: ${{ inputs.push && format('type=gha,mode=max,scope={0}-{1}', matrix.service, matrix.arch) || '' }}
+
+      - name: 保存构建 digest
+        if: inputs.push
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::构建 digest 格式无效" >&2; exit 1; }
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: 上传构建 digest
+        if: inputs.push
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-${{ github.run_id }}-${{ matrix.service }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  merge:
+    name: ${{ matrix.service }} 多架构 manifest
+    needs: [scope, publish]
+    if: inputs.push && needs.scope.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [web, frontend, updater]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.scope.outputs.revision }}
+
+      - name: 计算镜像名称与标签
+        id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REF_NAME: ${{ needs.scope.outputs.ref_name }}
+          REF_TYPE: ${{ needs.scope.outputs.ref_type }}
+          REVISION: ${{ needs.scope.outputs.revision }}
+          SERVICE: ${{ matrix.service }}
+        run: bash scripts/ci-image-metadata.sh
+
+      - name: 登录 GHCR
+        if: inputs.push
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 启用 Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: 下载两架构 digest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: digests-${{ github.run_id }}-${{ matrix.service }}-*
+          path: ${{ runner.temp }}/digests
+
+      - name: 合并 manifest 并核对架构
+        id: merge
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          ARTIFACT_PREFIX: digests-${{ github.run_id }}-${{ matrix.service }}
+        run: bash scripts/ci-merge-image.sh
 
       - name: 签发并推送 SLSA 构建来源证明
         if: inputs.push
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
         with:
           subject-name: ${{ steps.meta.outputs.image }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.merge.outputs.digest }}
           push-to-registry: true

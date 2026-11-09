@@ -62,7 +62,7 @@ struct SettingsView: View {
                     Toggle(isOn: $showReasoning) { Label("显示思考过程", systemImage: "brain") }
                         .accessibilityIdentifier("settings.showReasoning")
                 } header: { Text("Agent") } footer: {
-                    Text("打开时，Agent 回答上方有一行「思考了 1m 36s」，点开可看模型的思考过程（默认折叠）；关闭后完全不显示。只保存在本机。")
+                    Text("模型返回可展示的思考内容时，在回答上方显示折叠行，点按展开；关闭后隐藏思考行和内容。等待模型、调用工具等任务进度仍会显示。只保存在本机。")
                 }
                 Section {
                     Toggle(isOn: Binding(

@@ -86,6 +86,8 @@ final class AssistantStore {
     /// 第 24 轮：本机流式时计下的思考用时（按任务 ID）。旧服务器的历史消息没有 `stage_timings.reasoning_ms`，
     /// 刚生成完的回答用它显示「思考了 …」；只在内存里，重开 App 后旧服务器的历史消息只显示「思考过程」。
     private(set) var localReasoningSeconds: [String: Double] = [:]
+    private var reasoningHistory = ReasoningHistory()
+    private var reasoningScope: String { cacheKey + "/" + (sessionID ?? "") }
     var notice: String?
     var error: String?
     var busy = false
@@ -483,6 +485,16 @@ final class AssistantStore {
 
     /// 更新消息：先在后台线程完成脱敏与 Markdown 预处理（只处理尚未缓存的消息），再一次性替换消息与分组。
     func setMessages(_ rows: [AssistantItem]) async {
+        // Seed the fallback from already saved/cache-restored history as well.
+        for row in rows where row.text("role") == "assistant" {
+            if let text = row["content"]?["reasoning"]?.stringValue, !text.isEmpty {
+                reasoningHistory.remember(scope: reasoningScope,
+                                          runID: row["usage"]?["run_id"]?.stringValue,
+                                          messageID: row["id"]?.stringValue ?? row["id"]?.intValue.map(String.init),
+                                          text: AssistantRedaction.text(text))
+            }
+        }
+        let rows = rows.map { AssistantItem(value: reasoningHistory.restoring($0.value, scope: reasoningScope)) }
         let missing = rows.filter { rendered[AssistantRendered.key(for: $0)] == nil && $0.text("role") != "tool" }
         if !missing.isEmpty {
             let prepared = await Task.detached(priority: .userInitiated) { missing.map(AssistantRendered.make) }.value
@@ -550,6 +562,7 @@ final class AssistantStore {
                 let current = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))")
                 guard token == generation else { return }
                 activeRun = current
+                if current.assistantText("status") == "succeeded" { rememberLiveReasoning(runID: runID) }
                 await refreshMessages(model)
                 live.clearText()
             }
@@ -727,8 +740,11 @@ final class AssistantStore {
                     let row = try await model.request(path: AssistantPresentation.root + "/runs/\(AssistantPresentation.path(runID))")
                     guard token == generation else { return }
                     activeRun = row
-                    await refreshMessages(model)
                     let status = row.assistantText("status")
+                    // The final SSE packet can be missed during a disconnect.
+                    // Match its history row by run ID before clearing live state.
+                    if status == "succeeded" { rememberLiveReasoning(runID: runID) }
+                    await refreshMessages(model)
                     if AssistantPresentation.terminal.contains(status) || status == "waiting_input" || status == "waiting_approval" {
                         live.clearText()
                         if AssistantPresentation.terminal.contains(status) {
@@ -864,6 +880,14 @@ final class AssistantStore {
         }
     }
 
+    private func rememberLiveReasoning(runID: String, messageID: String? = nil) {
+        if let seconds = live.reasoningTimer.elapsed(now: Date()), seconds > 0 {
+            localReasoningSeconds[runID] = seconds
+        }
+        reasoningHistory.remember(scope: reasoningScope, runID: runID, messageID: messageID,
+                                  text: AssistantRedaction.text(live.receivedReasoning))
+    }
+
     private func consume(_ event: JSONValue, generation token: Int, subscription: UUID) {
         guard token == generation, subscription == subscriptionID else { return }
         // 收到任何事件（含心跳）= 已重新连上：断线提示消失。
@@ -885,8 +909,14 @@ final class AssistantStore {
         switch type {
         case "assistant_delta": live.appendText(event.assistantText("delta"))
         case "assistant_reasoning_delta", "reasoning_delta": live.appendReasoning(event.assistantText("delta"))
-        case "assistant_delta_reset": live.clearText()
-        case "assistant_message": live.replace(text: event.assistantText("content"), reasoning: event.assistantText("reasoning"))
+        case "assistant_delta_reset":
+            // Tool-stage draft reset only retracts the provisional answer. A
+            // deliberate response retry carries a reason and retracts its thinking too.
+            live.clearText(preservingReasoning: event.assistantText("reason").isEmpty)
+        case "assistant_message":
+            live.replace(text: event.assistantText("content"), reasoning: event.assistantText("reasoning"))
+            rememberLiveReasoning(runID: event.assistantText("run_id").nilIfBlank ?? runID ?? "",
+                                  messageID: event["message_id"]?.stringValue ?? event["message_id"]?.intValue.map(String.init))
         default: break
         }
     }
@@ -945,7 +975,7 @@ enum AssistantProgress {
         case "checking_model", "selecting_model": return Status(symbol: "cpu", text: "连接模型…")
         case "routing": return Status(symbol: "arrow.triangle.branch", text: "选择工具…")
         case "selecting_skill": return Status(symbol: "wand.and.stars", text: "加载技能…")
-        case "thinking": return Status(symbol: "brain", text: "思考中…")
+        case "thinking": return Status(symbol: "ellipsis", text: "等待模型回复…")
         case "using_tool": return Status(symbol: "wrench.and.screwdriver", text: tool.isEmpty ? "调用工具…" : "调用工具：\(tool)…")
         case "responding": return Status(symbol: "text.bubble", text: "生成回复…")
         case "finalizing", "finishing": return Status(symbol: "checkmark.circle", text: "整理回复…")

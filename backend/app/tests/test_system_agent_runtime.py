@@ -1405,3 +1405,48 @@ async def test_router_call_uses_namespaced_session_identity(monkeypatch) -> None
     assert router_sessions == ["router:session-1"]
     assert main_sessions and set(main_sessions) == {"session-1"}
     assert router_sessions[0] != main_sessions[0]
+
+
+@pytest.mark.asyncio
+async def test_real_shared_stream_preserves_reasoning_in_final_message(monkeypatch) -> None:
+    """Provider -> shared stream -> tool loop -> public final message (no run_agent stub)."""
+    from app.services import llm_account_budget, llm_runtime
+
+    primary, fallback = _providers()
+    await _patch_runtime_config(monkeypatch, primary, fallback)
+    reasoning = "先核对已知状态，再汇总观察。" * 30
+
+    class Client:
+        async def stream_invoke(self, request):
+            yield ModelStreamEvent(reasoning_delta=reasoning)
+            await asyncio.sleep(0.025)
+            yield ModelStreamEvent(delta="核对完成")
+            # A compatible provider sends reasoning only in delta packets.
+            yield ModelStreamEvent(response=ModelResponse(
+                model=request.model,
+                content=(TextContent("核对完成"),),
+                usage=ModelUsage(input_tokens=10, output_tokens=5),
+                stop_reason=StopReason.COMPLETED,
+            ))
+
+    monkeypatch.setattr(llm_runtime, "build_client_from_dto", lambda *_a, **_k: Client())
+    monkeypatch.setattr(llm_runtime, "_check_budget", AsyncMock(return_value=llm_runtime.BudgetCheck()))
+    monkeypatch.setattr(llm_runtime, "_emit_usage", AsyncMock())
+    monkeypatch.setattr(llm_account_budget, "settle", AsyncMock())
+    events = [event async for event in SystemAgentRuntime(_registry()).stream_turn(
+        None,
+        session=_session(),
+        user_text="帮我看看当前状态",
+        role="admin",
+        channel="web",
+    )]
+    assert events[-1]["ok"] is True
+    streamed = "".join(e.get("delta", "") for e in events if e["type"] == "assistant_reasoning_delta")
+    final = next(e for e in events if e["type"] == "assistant_message")
+    assert streamed == reasoning
+    assert final["reasoning"] == reasoning
+    assert final["content"] == "核对完成"
+    assert final["usage"]["stage_timings"]["reasoning_ms"] >= 15
+    assert next(i for i, e in enumerate(events) if e["type"] == "assistant_reasoning_delta") < next(
+        i for i, e in enumerate(events) if e["type"] == "assistant_message"
+    )

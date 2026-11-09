@@ -117,7 +117,9 @@ def test_release_metadata_is_identified_without_forcing_browser() -> None:
             "frontend/package.json",
             "frontend/src/lib/version.ts",
             "CHANGELOG.md",
-        ]
+        ],
+        # CLI verifies that package.json changed only its version before excluding it.
+        ignored_runtime_paths={"frontend/package.json"},
     )
 
     assert scope.version is True

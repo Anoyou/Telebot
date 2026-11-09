@@ -108,9 +108,11 @@ async def test_structured_stream_settles_once_and_records_terminal_usage(monkeyp
 
     class _Client:
         async def stream_invoke(self, request: ModelRequest):
+            yield ModelStreamEvent(reasoning_delta="先核对")
             yield ModelStreamEvent(delta="o")
-            yield ModelStreamEvent(delta="k")
             yield ModelStreamEvent(
+                delta="k",
+                reasoning_delta="再确认",
                 response=ModelResponse(
                     model=request.model,
                     content=(TextContent("ok"),),
@@ -145,6 +147,9 @@ async def test_structured_stream_settles_once_and_records_terminal_usage(monkeyp
     ]
 
     assert [event.delta for event, _used, _fallback in events if event.delta] == ["o", "k"]
+    assert [event.reasoning_delta for event, _used, _fallback in events if event.reasoning_delta] == ["先核对", "再确认"]
+    assert all(event.response is None for event, _used, _fallback in events[:-1])
+    assert not events[-1][0].delta and not events[-1][0].reasoning_delta
     assert events[-1][0].response is not None
     settle.assert_awaited_once_with(
         ticket,
@@ -254,7 +259,8 @@ async def test_structured_stream_premium_budget_falls_back_to_cheaper_provider(m
 
 
 @pytest.mark.asyncio
-async def test_structured_stream_does_not_retry_after_partial_delta(monkeypatch) -> None:
+@pytest.mark.parametrize("delta_field", ["delta", "reasoning_delta"])
+async def test_structured_stream_does_not_retry_after_partial_delta(monkeypatch, delta_field) -> None:
     from app.services.llm_client import LLMCallFailed, LLMError
 
     provider = LLMProviderDTO(
@@ -272,7 +278,7 @@ async def test_structured_stream_does_not_retry_after_partial_delta(monkeypatch)
         async def stream_invoke(self, _request: ModelRequest):
             nonlocal attempts
             attempts += 1
-            yield ModelStreamEvent(delta="partial")
+            yield ModelStreamEvent(**{delta_field: "partial"})
             raise LLMError("upstream reset", retryable=True)
 
     monkeypatch.setattr(
@@ -296,7 +302,7 @@ async def test_structured_stream_does_not_retry_after_partial_delta(monkeypatch)
             account_id=7,
             client_factory=lambda *_args, **_kwargs: _Client(),
         ):
-            seen.append(item[0].delta)
+            seen.append(getattr(item[0], delta_field))
 
     assert seen == ["partial"]
     assert attempts == 1

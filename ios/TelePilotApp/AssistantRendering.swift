@@ -136,9 +136,15 @@ final class AssistantLiveState {
         scheduleCommit()
     }
 
+    /// Snapshot includes the last throttled delta, without forcing the answer animation to finish.
+    var receivedReasoning: String { reasoning + pendingReasoning }
+
     /// 最终回答（`assistant_message`）：是已显示内容的延续时接着逐字追平（约 0.3 秒内）；
     /// 否则（服务器改写过，或不做动画）整段替换，立即提交。
     func replace(text value: String, reasoning newReasoning: String) {
+        // Compatible servers may omit reasoning from the final packet. Do not
+        // erase the reasoning already received (including an uncommitted tail).
+        let finalReasoning = newReasoning.isEmpty ? reasoning + pendingReasoning : newReasoning
         if pacingEnabled, reveal.finish(final: value) {
             flushTask?.cancel()
             flushTask = nil
@@ -149,8 +155,8 @@ final class AssistantLiveState {
                 pendingText = ""
                 render()
             }
-            if reasoning != newReasoning {
-                reasoning = newReasoning
+            if reasoning != finalReasoning {
+                reasoning = finalReasoning
                 revision &+= 1
             }
             startRevealLoop()
@@ -164,12 +170,15 @@ final class AssistantLiveState {
         text = value
         stableEnd = 0
         if !stableBlocks.isEmpty { stableBlocks = []; stableVersion += 1 }
-        if reasoning != newReasoning { reasoning = newReasoning }
+        if reasoning != finalReasoning { reasoning = finalReasoning }
         render()
     }
 
     /// 清空正文与推理（进入工具阶段、任务结束、切换会话）。
-    func clearText() {
+    func clearText(preservingReasoning: Bool = false) {
+        if preservingReasoning && !pendingReasoning.isEmpty {
+            reasoning += pendingReasoning
+        }
         cancelPending()
         stopRevealLoop()
         reveal.reset()
@@ -177,7 +186,7 @@ final class AssistantLiveState {
         stableEnd = 0
         if !stableBlocks.isEmpty { stableBlocks = []; stableVersion += 1 }
         if !tailBlocks.isEmpty { tailBlocks = [] }
-        if !reasoning.isEmpty { reasoning = "" }
+        if !preservingReasoning && !reasoning.isEmpty { reasoning = "" }
         if hasText { hasText = false }
     }
 

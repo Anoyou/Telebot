@@ -1177,7 +1177,7 @@ async def stream_model_with_fallback(
 ) -> AsyncIterator[tuple[ModelStreamEvent, LLMProviderDTO, bool]]:
     """Stream structured requests through the same fallback and budget gates.
 
-    Only provider-originated ``ModelStreamEvent.delta`` values leave this
+    Only provider-originated text and reasoning deltas leave this
     iterator.  A retry/fallback is allowed before any text has reached the
     caller.  Once text has been emitted, retrying would duplicate or contradict
     visible content, so the partial stream fails explicitly instead.
@@ -1301,9 +1301,14 @@ async def stream_model_with_fallback(
                         )
                         provider_call_started = True
                         async for event in client.stream_invoke(provider_request):
-                            if event.delta:
+                            if event.delta or event.reasoning_delta:
                                 candidate_emitted_delta = True
-                                yield event, provider, index > 0
+                                # A combined delta/terminal packet must still pass
+                                # usage and budget settlement before its final response.
+                                yield ModelStreamEvent(
+                                    delta=event.delta,
+                                    reasoning_delta=event.reasoning_delta,
+                                ), provider, index > 0
                             if event.response is not None:
                                 terminal_response = event.response
                                 break

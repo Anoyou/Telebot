@@ -24,24 +24,9 @@ name: iOS
 on:
   pull_request:
     branches: [Beta, main]
-    paths:
-      - "ios/**"
-      - "openapi/telepilot.openapi.json"
-      # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
-      - "frontend/src/lib/modelBrand*.json"
-      # 插件声明式 UI 契约规范（iOS 副本由 sync-plugin-ui-widgets.py 校验）。
-      - "schemas/plugin-ui-widgets.json"
-      - ".github/workflows/ios.yml"
   push:
-    branches: [Beta]
-    paths:
-      - "ios/**"
-      - "openapi/telepilot.openapi.json"
-      # 模型家族映射与图标由 Web 与 iOS 共用（sync-model-brands.py 校验）。
-      - "frontend/src/lib/modelBrand*.json"
-      # 插件声明式 UI 契约规范（iOS 副本由 sync-plugin-ui-widgets.py 校验）。
-      - "schemas/plugin-ui-widgets.json"
-      - ".github/workflows/ios.yml"
+    branches: [Beta, main]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -68,13 +53,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      skip: ${{ steps.decide.outputs.skip }}
+      skip: ${{ (steps.decide.outputs.skip == 'true' || steps.selection.outputs.ios_skip == 'true') && 'true' || 'false' }}
       tree: ${{ steps.decide.outputs.tree }}
-      reason: ${{ steps.decide.outputs.reason }}
+      reason: ${{ steps.selection.outputs.ios_skip == 'true' && '没有 iOS 运行时改动，跳过编译与 UI 测试' || steps.decide.outputs.reason }}
       ui_skip: ${{ steps.decide.outputs.ui_skip }}
       durations: ${{ steps.durations.outputs.json }}
+      selection: ${{ steps.selection.outputs.ios_selection }}
+      shards: ${{ steps.selection.outputs.ios_shards }}
+      total: ${{ steps.selection.outputs.ios_total }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: 对比已全绿的被测文件树
         id: decide
@@ -83,17 +73,23 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
           EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          BASE_REF: ${{ github.base_ref }}
           REPO_ID: ${{ github.repository_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           api() { curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$GITHUB_API_URL/repos/$REPO/$1"; }
+          FORCE_FULL=false
+          if [[ "$REF_NAME" == "main" || "$BASE_REF" == "main" || "$REF_TYPE" == "tag" || "$EVENT" == "workflow_dispatch" ]]; then FORCE_FULL=true; fi
+          echo "force_full=$FORCE_FULL" >> "$GITHUB_OUTPUT"
           TREE=$(api "git/commits/$SHA" | jq -r .tree.sha)
           echo "被测提交 $SHA，文件树 $TREE"
           echo "tree=$TREE" >> "$GITHUB_OUTPUT"
           SKIP=false; UI_SKIP=false; REASON="完整执行"
-          if [ "$EVENT" = "push" ]; then
+          if [ "$EVENT" = "push" ] && [ "$FORCE_FULL" != "true" ]; then
             # 只认本仓库分支（非 fork）上「iOS」工作流成功结束的 run 留下的标记。
             for RUN in $(api "actions/artifacts?name=${GREEN_TREE_PREFIX}${TREE}&per_page=20" \
                 | jq -r --argjson repo "$REPO_ID" '.artifacts[] | select(.expired | not)
@@ -109,7 +105,12 @@ jobs:
           fi
           # 第十一轮：iOS 相关路径里只有服务器 OpenAPI 快照变化（纯服务器 PR / 合并）时，在 Ubuntu 上校验原生子集，
           # 一致即跳过。文件清单：PR 用 pulls/N/files，push 用 compare/before...sha；取不到或过多则完整执行。
-          if [ "$SKIP" != "true" ] && { [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; }; then
+          # 快捷跳过也必须使用最近成功祖先，不能跨过尚未通过的 iOS 改动。
+          if [[ "$SKIP" != "true" && "$FORCE_FULL" != "true" && "$EVENT" == "push" && "$REF_NAME" == "Beta" ]]; then
+            BEFORE=$(python3 scripts/ci_baseline.py --workflow ios.yml --branch Beta --head "$SHA")
+          fi
+          echo "base=$BEFORE" >> "$GITHUB_OUTPUT"
+          if [ "$FORCE_FULL" != "true" ] && [ "$SKIP" != "true" ] && { [ "$EVENT" = "pull_request" ] || [ "$EVENT" = "push" ]; }; then
             FILES=""; COMPLETE=false
             if [ "$EVENT" = "pull_request" ]; then
               FILES=$(for PAGE in $(seq 1 30); do
@@ -121,7 +122,8 @@ jobs:
               CMP=$(api "compare/$BEFORE...$SHA") && [ "$(jq '.files | length' <<<"$CMP")" -lt 300 ] \
                 && FILES=$(jq -r '.files[].filename' <<<"$CMP") && COMPLETE=true
             fi
-            if [ "$COMPLETE" = "true" ] && [ -n "$FILES" ]; then
+            # 全量范围优先于两种契约快跳；复用 planner 规则，未知路径或判定失败均不快跳。
+            if [ "$COMPLETE" = "true" ] && [ -n "$FILES" ] && python3 -c 'import sys; from scripts.ci_test_plan import requires_full; sys.exit(requires_full(sys.stdin.read().splitlines()))' <<<"$FILES"; then
               IOS_FILES=$(grep -E '^(ios/|frontend/src/lib/modelBrand[^/]*\.json$|\.github/workflows/ios\.yml$)' <<<"$FILES" || true)
               # 插件 UI 契约规范 schemas/plugin-ui-widgets.json 同理：iOS 副本经 sync-plugin-ui-widgets.py --check 一致即可跳过。
               if [ -z "$IOS_FILES" ] && grep -qxE 'openapi/telepilot\.openapi\.json|schemas/plugin-ui-widgets\.json' <<<"$FILES"; then
@@ -149,6 +151,30 @@ jobs:
           echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
           echo "ui_skip=$UI_SKIP" >> "$GITHUB_OUTPUT"
           echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+
+      - name: 选择受影响的 UI 用例
+        id: selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          BEFORE: ${{ steps.decide.outputs.base }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          FORCE_FULL: ${{ steps.decide.outputs.force_full }}
+          REUSE: ${{ steps.decide.outputs.skip }}
+        run: |
+          if [[ "$REUSE" == "true" ]]; then
+            { echo 'ios_selection=null'; echo 'ios_shards=[1]'; echo 'ios_total=1'; echo 'ios_skip=false'; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="$BEFORE"
+          if [[ "$EVENT" == "pull_request" ]]; then
+            base=$(git merge-base "$PR_BASE" "$HEAD" || echo '')
+          fi
+          args=(--root . --base "$base" --head "$HEAD" --github-output "$GITHUB_OUTPUT" --github-summary "$GITHUB_STEP_SUMMARY")
+          if [[ "$FORCE_FULL" == "true" ]]; then args+=(--force-full); fi
+          python3 scripts/ci_test_plan.py "${args[@]}" --target ios
 
       - name: 合并最近全绿 run 的 UI 用例耗时
         # 取不到时输出为空，分片回退到仓库里的 ui-test-durations.json；任何错误都不影响判定结果。
@@ -182,6 +208,9 @@ jobs:
     if: needs.plan.outputs.skip != 'true'
     runs-on: xcode-27
     timeout-minutes: 30
+    env:
+      UI_TEST_SHARDS: ${{ needs.plan.outputs.total }}
+      UI_TEST_SELECTION: ${{ needs.plan.outputs.selection }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -205,7 +234,8 @@ jobs:
           python3 scripts/sync-plugin-ui-widgets.py --check
           python3 ios/TelePilotCore/scripts/check-model-brand-icons.py
           printf '%s' "$UI_TEST_DURATIONS" > "$RUNNER_TEMP/ui-test-durations-measured.json"
-          python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --summary --durations-override "$RUNNER_TEMP/ui-test-durations-measured.json"
+          printf '%s' "$UI_TEST_SELECTION" > "$RUNNER_TEMP/ui-test-selection.json"
+          python3 ios/scripts/ui-test-shards.py --selection "$RUNNER_TEMP/ui-test-selection.json" --total "$UI_TEST_SHARDS" --summary --durations-override "$RUNNER_TEMP/ui-test-durations-measured.json"
 
       - name: 编译（build-for-testing）
         run: |
@@ -315,7 +345,7 @@ jobs:
           if-no-files-found: ignore
 
   ui-tests:
-    name: UI 测试 ${{ matrix.shard }}/4
+    name: UI 测试 ${{ matrix.shard }}/${{ needs.plan.outputs.total }}
     # 第二十二轮：等编译 job 成功后才开始（不再与编译同时开始、持机空等产物）；编译失败或跳过时分片随之跳过。
     # 开始后模拟器在后台启动，同时下载并解包产物。
     needs: [plan, build]
@@ -325,7 +355,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+    env:
+      UI_TEST_SHARDS: ${{ needs.plan.outputs.total }}
+      UI_TEST_SELECTION: ${{ needs.plan.outputs.selection }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -414,7 +447,8 @@ jobs:
           set -o pipefail
           # 与编译 job、其他分片使用同一份实测耗时覆盖表（来自「判定」job），保证分片划分一致。
           printf '%s' "$UI_TEST_DURATIONS" > "$RUNNER_TEMP/ui-test-durations-measured.json"
-          ONLY=$(python3 ios/scripts/ui-test-shards.py --total "$UI_TEST_SHARDS" --shard ${{ matrix.shard }} --durations-override "$RUNNER_TEMP/ui-test-durations-measured.json")
+          printf '%s' "$UI_TEST_SELECTION" > "$RUNNER_TEMP/ui-test-selection.json"
+          ONLY=$(python3 ios/scripts/ui-test-shards.py --selection "$RUNNER_TEMP/ui-test-selection.json" --total "$UI_TEST_SHARDS" --shard ${{ matrix.shard }} --durations-override "$RUNNER_TEMP/ui-test-durations-measured.json")
           echo "本分片用例："; echo "$ONLY" | sed 's/^-only-testing:/  /'
           # 失败的用例自动重跑一次（只重跑失败的那个），两次都失败才判失败。
           # shellcheck disable=SC2086
@@ -500,7 +534,7 @@ jobs:
             echo "::error::iOS 构建与测试未全部通过"
             exit 1
           fi
-          echo "全部通过"
+          echo "本次要求的检查全部通过"
           mkdir -p green && echo "${{ github.sha }}" > green/sha.txt
 
       - name: 下载各分片用例耗时

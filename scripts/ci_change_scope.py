@@ -21,6 +21,8 @@ class CiScope:
     full: bool
     # 镜像构建输入（Dockerfile、依赖清单、发布工作流）是否变化：PR 上据此做一次不推送的多架构构建校验。
     images: bool = False
+    gateway: bool = False
+    migrations: bool = False
 
     def to_outputs(self) -> dict[str, str]:
         outputs = {key: "true" if value else "false" for key, value in asdict(self).items()}
@@ -55,6 +57,8 @@ _IMAGE_FILES = {
     "frontend/pnpm-lock.yaml",
     "frontend/pnpm-workspace.yaml",
     "gateway/go.mod",
+    "scripts/ci-image-metadata.sh",
+    "scripts/ci-merge-image.sh",
 }
 _BROWSER_PREFIXES = (
     "frontend/e2e/",
@@ -83,23 +87,26 @@ def _is_docs_only_path(path: str) -> bool:
     return (
         path in _DOC_FILES
         or path.startswith("docs/")
-        or Path(path).suffix.lower() in {".md", ".rst", ".txt"}
+        or Path(path).suffix.lower() in {".md", ".rst"}
     )
 
 
-def classify_paths(paths: list[str], *, force_full: bool = False) -> CiScope:
+def classify_paths(paths: list[str], *, force_full: bool = False, ignored_runtime_paths: set[str] | None = None) -> CiScope:
     files = [_normalize(path) for path in paths if path.strip()]
     # 文件清单未知时按需要校验镜像处理（宁可多跑一次构建校验）。
     images = not files or any(path in _IMAGE_FILES for path in files)
     full = force_full or not files or any(
-        path == "scripts/ci_change_scope.py" or path.startswith(".github/workflows/")
+        path in {"scripts/ci_change_scope.py", "scripts/ci_test_plan.py", "scripts/ci_run_tests.py", "scripts/ci_frontend_impact.cjs", "scripts/ci_frontend_impact.test.cjs", "scripts/ci-test-map.json", "scripts/ci_baseline.py", "ios/scripts/ui-test-shards.py"} or path.startswith(".github/workflows/")
         for path in files
     )
+    full = full or any(not _is_docs_only_path(p) and not p.startswith(("backend/", "frontend/", "ios/", "gateway/", "deploy/", "plugins/", "scripts/", "schemas/", "openapi/", "examples/")) for p in files)
     if full:
-        return CiScope(True, True, True, True, True, True, False, True, images)
+        return CiScope(True, True, True, True, True, True, False, True, images, True, True)
+    original_files = files
+    files = [p for p in files if p not in (ignored_runtime_paths or set()) and not _is_docs_only_path(p)]
 
     backend = any(
-        path.startswith(("backend/", "deploy/", "plugins/", "scripts/"))
+        path.startswith(("backend/", "deploy/", "plugins/", "scripts/", "examples/"))
         or path in {"docker-compose.yml", ".dockerignore", "Makefile"}
         # 插件声明式 UI 契约：规范与副本任一变化都要在后端 job 跑 sync-plugin-ui-widgets.py --check。
         or path in _PLUGIN_UI_CONTRACT_FILES
@@ -113,6 +120,10 @@ def classify_paths(paths: list[str], *, force_full: bool = False) -> CiScope:
             and not path.endswith((".test.ts", ".test.tsx", ".test.js", ".test.cjs"))
         )
         or path in {
+            "frontend/package.json",
+            "frontend/pnpm-lock.yaml",
+            "frontend/pnpm-workspace.yaml",
+            "frontend/.npmrc",
             "frontend/index.html",
             "frontend/playwright.config.ts",
             "frontend/vite.config.ts",
@@ -144,16 +155,18 @@ def classify_paths(paths: list[str], *, force_full: bool = False) -> CiScope:
         }
         for path in files
     )
-    version = any(path in _VERSION_FILES for path in files)
-    docs_only = all(_is_docs_only_path(path) for path in files)
-    return CiScope(backend, frontend, browser, plugin, contract, version, docs_only, False, images)
+    version = any(path in _VERSION_FILES for path in original_files)
+    docs_only = all(_is_docs_only_path(path) for path in original_files)
+    gateway = any(path.startswith("gateway/") for path in files)
+    migrations = any(path.startswith(("backend/app/models", "backend/app/db", "backend/alembic/")) or path in {"backend/pyproject.toml", "backend/alembic.ini"} for path in files)
+    return CiScope(backend, frontend, browser, plugin, contract, version, docs_only, False, images, gateway, migrations)
 
 
 def changed_paths(root: Path, base: str, head: str) -> list[str]:
     if not base or set(base) == {"0"}:
         raise RuntimeError("缺少可比较的上一提交")
     result = subprocess.run(
-        ["git", "-c", "core.quotePath=false", "diff", "--name-only", "-z", f"{base}..{head}"],
+        ["git", "-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", f"{base}..{head}"],
         cwd=root,
         capture_output=True,
         text=True,
@@ -175,7 +188,10 @@ def main() -> None:
 
     try:
         paths = changed_paths(args.root.resolve(), args.base, args.head)
-        scope = classify_paths(paths, force_full=args.force_full)
+        from ci_test_plan import version_only_paths
+
+        ignored = version_only_paths(args.root.resolve(), paths, args.base, args.head)
+        scope = classify_paths(paths, force_full=args.force_full, ignored_runtime_paths=ignored)
     except RuntimeError as error:
         print(f"无法可靠计算变更范围，转为完整门禁：{error}")
         scope = classify_paths([], force_full=True)

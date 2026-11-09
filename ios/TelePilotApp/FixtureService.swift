@@ -71,6 +71,9 @@ actor FixtureService: AppServing {
     private var phaseRunStartedAt: Date?
     private var phaseQueue: [JSONValue] = []
     private var phaseQueueSerial = 0
+    private let liveReasoningMode = ProcessInfo.processInfo.arguments.contains("--ui-test-live-reasoning")
+    private var reasoningRunStarted = false
+    private var reasoningRunFinished = false
 
     init(offline: Bool = false) {
         self.offline = offline
@@ -354,6 +357,7 @@ actor FixtureService: AppServing {
                         "model_selection": sessionModelSelections[id] ?? .null]
             }
         }
+        if liveReasoningMode, let response = reasoningResponse(clean, method: method) { return response }
         if runPhases, let response = runPhaseResponse(clean, path: path, method: method, body: body) { return response }
         if clean.hasSuffix("/messages"), ProcessInfo.processInfo.arguments.contains("--ui-test-long-history") {
             let before = URLComponents(string: path)?.queryItems?.first { $0.name == "before_id" }?.value.flatMap(Int.init)
@@ -869,8 +873,58 @@ actor FixtureService: AppServing {
         }
     }
 
+    // Regression fixture: real-shaped streamed reasoning, a tool draft reset,
+    // then a final/history response that omits reasoning (older compatible server).
+    private func reasoningResponse(_ clean: String, method: String) -> JSONValue? {
+        let run: JSONValue = ["id": "fixture-reasoning-run", "session_id": "fixture-session",
+                              "status": .string(reasoningRunFinished ? "succeeded" : "running"), "phase": "thinking"]
+        if clean == "/api/system-agent/sessions/fixture-session/runs", method == "POST" {
+            reasoningRunStarted = true
+            return run
+        }
+        if clean == "/api/system-agent/runs" { return reasoningRunStarted ? [run] : [] }
+        if clean == "/api/system-agent/runs/fixture-reasoning-run" { return run }
+        if clean.hasSuffix("/messages"), reasoningRunStarted {
+            var messages: [JSONValue] = [["id": 2, "role": "user", "content": ["text": "请核对状态"], "run_status": "completed"]]
+            if reasoningRunFinished {
+                messages.append(["id": 3, "role": "assistant", "content": ["text": "核对完成，状态正常。"],
+                                 "run_status": "completed", "usage": ["run_id": "fixture-reasoning-run"]])
+            }
+            return .array(messages)
+        }
+        return nil
+    }
+
+    private func streamReasoning(onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
+        let events: [JSONValue] = [
+            ["type": "assistant_reasoning_delta", "delta": "先核对账号"],
+            ["type": "assistant_reasoning_delta", "delta": "，再检查配置"],
+            ["type": "assistant_delta", "delta": "临时草稿"],
+            ["type": "assistant_delta_reset"],
+            ["type": "tool_started", "tool_name": "accounts.list"],
+            ["type": "tool_finished", "tool_name": "accounts.list"],
+            ["type": "assistant_reasoning_delta", "delta": "；最后汇总结果。"],
+            ["type": "assistant_delta", "delta": "核对完成，状态正常。"],
+            ["type": "assistant_message", "content": "核对完成，状态正常。", "message_id": 3],
+            ["type": "done", "ok": true]
+        ]
+        for (index, event) in events.enumerated() {
+            if event["type"]?.stringValue == "assistant_message", ProcessInfo.processInfo.arguments.contains("--ui-test-missing-final") { continue }
+            if index == 2 { try await Task.sleep(for: .seconds(2)) }
+            var payload = event.objectValue ?? [:]
+            payload["seq"] = .integer(Int64(index + 1))
+            payload["run_id"] = "fixture-reasoning-run"
+            await onEvent(.object(payload))
+        }
+        reasoningRunFinished = true
+    }
+
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         try checkConnection()
+        if liveReasoningMode, path.contains("/runs/fixture-reasoning-run/stream") {
+            try await streamReasoning(onEvent: onEvent)
+            return
+        }
         // 第 22 轮：`--ui-test-stream-drop` 让 Agent 进度流前两次订阅中途断开（第一次先收到一个事件），第三次恢复正常。
         if runPhases, streamDrops < 2, ProcessInfo.processInfo.arguments.contains("--ui-test-stream-drop"),
            (path.removingPercentEncoding ?? path).contains("/runs/fixture-run/stream") {

@@ -3,7 +3,7 @@
 
 用例清单直接从 TelePilotUITests/*.swift 解析（`final class X: XCTestCase` 内的 `func testXxx()`），
 新增用例无需手工登记，自动进入某个分片；ui-test-durations.json 只用于均衡耗时，
-未登记的用例按默认耗时估算。所有分片的并集严格等于全部用例，不会漏测。
+未登记的用例按默认耗时估算。默认分片并集等于全部用例；传入 --selection 时严格等于选定集合，不会漏测或重复。
 
 第十一轮：--durations-override 指向最近几次全绿 run 实测耗时的合并表（ui-test-durations-tool.py 生成，
 「判定」job 统一下发，所有分片用同一份），其中有的用例优先用实测值，没有的再用仓库里的表。
@@ -68,10 +68,19 @@ def load_override(path: Path | None) -> dict[str, float]:
     return {k: float(v) for k, v in data.items() if isinstance(k, str) and isinstance(v, (int, float)) and v > 0}
 
 
-def plan(total: int, override: dict[str, float] | None = None) -> list[list[tuple[str, float]]]:
+def plan(total: int, override: dict[str, float] | None = None, selection: list[str] | None = None) -> list[list[tuple[str, float]]]:
     durations = json.loads(DURATIONS.read_text(encoding="utf-8")) if DURATIONS.exists() else {}
     durations.update(override or {})
     tests = discover()
+    if selection is not None:
+        if not isinstance(selection, list) or not selection or any(not isinstance(t, str) for t in selection) or len(selection) != len(set(selection)):
+            raise ValueError("测试选择必须是非空且不重复的标识列表")
+        unknown = set(selection) - set(tests)
+        if unknown:
+            raise ValueError("选择了不存在的 UI 用例：" + ", ".join(sorted(unknown)))
+        tests = selection
+    if total < 1 or total > len(tests):
+        raise ValueError("分片数必须在 1 与所选用例数之间")
     weighted = sorted(((t, float(durations.get(t, DEFAULT_SECONDS))) for t in tests), key=lambda x: (-x[1], x[0]))
     shards: list[list[tuple[str, float]]] = [[] for _ in range(total)]
     loads = [0.0] * total
@@ -90,11 +99,16 @@ def main() -> int:
     group.add_argument("--shard", type=int, help="从 1 开始的分片序号")
     group.add_argument("--summary", action="store_true")
     parser.add_argument("--durations-override", type=Path, help="实测耗时覆盖表（JSON：类/用例 → 秒）")
+    parser.add_argument("--selection", type=Path, help="JSON 用例列表；null 表示完整回归")
     args = parser.parse_args()
     if args.total < 1:
         raise SystemExit("--total 必须 ≥ 1")
     override = load_override(args.durations_override)
-    shards = plan(args.total, override)
+    try:
+        selection = json.loads(args.selection.read_text()) if args.selection else None
+        shards = plan(args.total, override, selection)
+    except (OSError, ValueError) as error:
+        raise SystemExit(f"无法安全分片：{error}") from error
     if args.summary:
         tests = {t for s in shards for t, _ in s}
         used = len(tests & override.keys())

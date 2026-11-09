@@ -39,6 +39,7 @@ async def test_agent_retries_once_when_model_falsely_claims_image_is_missing() -
         calls.append(request)
         if len(calls) == 1:
             refusal = "我无法查看图片内容，当前会话没有提供任何视觉工具。"
+            yield ModelStreamEvent(reasoning_delta="第一轮误判图片缺失")
             yield ModelStreamEvent(delta=refusal)
             yield ModelStreamEvent(
                 response=ModelResponse(
@@ -50,6 +51,7 @@ async def test_agent_retries_once_when_model_falsely_claims_image_is_missing() -
             )
             return
         assert "1 张模型原生视觉图片" in request.messages[-1].text_content()
+        yield ModelStreamEvent(reasoning_delta="重新查看实际图片")
         yield ModelStreamEvent(delta="图中是一只猫。")
         yield ModelStreamEvent(
             response=ModelResponse(
@@ -85,6 +87,7 @@ async def test_agent_retries_once_when_model_falsely_claims_image_is_missing() -
     )
 
     assert result.text == "图中是一只猫。"
+    assert result.reasoning_content == "重新查看实际图片"
     assert len(calls) == 2
     assert events == [
         "delta:我无法查看图片内容，当前会话没有提供任何视觉工具。",
@@ -211,7 +214,8 @@ async def test_agent_executes_tool_then_returns_answer() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agent_streams_real_deltas_and_reconciles_final_text() -> None:
+@pytest.mark.parametrize("terminal_reasoning", [None, "", "先分析", "最终思考摘要"])
+async def test_agent_streams_real_deltas_and_reconciles_final_text(terminal_reasoning) -> None:
     deltas: list[str] = []
     reasoning_deltas: list[str] = []
 
@@ -228,7 +232,7 @@ async def test_agent_streams_real_deltas_and_reconciles_final_text() -> None:
                 content=(TextContent("真流"),),
                 usage=ModelUsage(input_tokens=2, output_tokens=2),
                 stop_reason=StopReason.COMPLETED,
-                reasoning_content="先分析",
+                reasoning_content=terminal_reasoning,
             )
         )
 
@@ -246,7 +250,7 @@ async def test_agent_streams_real_deltas_and_reconciles_final_text() -> None:
     assert deltas == ["真", "流"]
     assert reasoning_deltas == ["先分析"]
     assert result.text == "真流"
-    assert result.reasoning_content == "先分析"
+    assert result.reasoning_content == (terminal_reasoning or "先分析")
     assert result.usage.total_tokens == 4
 
 
