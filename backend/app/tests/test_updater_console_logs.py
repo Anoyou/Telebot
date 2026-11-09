@@ -321,9 +321,21 @@ def test_production_defaults_to_prebuilt_images_with_explicit_source_fallback() 
     assert "org.opencontainers.image.source" in prod_up
     assert "RepoDigests" in prod_up
     assert "verify_image_attestation" in prod_up
-    assert "linux/amd64,linux/arm64" in workflow
+    # 原生双架构任务必须分别构建，并在全部成功后合并为同一发布 manifest。
+    assert "arch: [amd64, arm64]" in workflow
+    assert "arch: amd64\n            runner: ubuntu-latest" in workflow
+    assert "arch: arm64\n            runner: ubuntu-24.04-arm" in workflow
+    assert "platforms: linux/${{ matrix.arch }}" in workflow
+    assert "push-by-digest=true" in workflow
+    assert "needs: [scope, publish]" in workflow
+    assert "run: bash scripts/ci-merge-image.sh" in workflow
+    assert "subject-digest: ${{ steps.merge.outputs.digest }}" in workflow
     assert "packages: write" in workflow
-    assert "sha-${REVISION}" in workflow
+    metadata_script = (repo_root / "scripts" / "ci-image-metadata.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "run: bash scripts/ci-image-metadata.sh" in workflow
+    assert "sha-${REVISION}" in metadata_script
     assert "workflow_call:" in workflow
     assert "actions/attest@" in workflow
     assert "attestations: write" in workflow
