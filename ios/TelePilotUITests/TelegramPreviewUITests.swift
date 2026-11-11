@@ -220,7 +220,12 @@ final class TelegramPreviewUITests: XCTestCase {
         reveal(itemPreview, in: app)
         XCTAssertTrue(itemPreview.waitForExistence(timeout: 10), "条目模板默认显示示例效果")
         let itemEditor = element(app, "interaction.query.item.editor")
-        reveal(itemEditor, in: app)
+        // 输入框在预览上方；回滚定位后仍在末尾点击，保持追加模板的编辑行为。
+        for _ in 0..<8 where !(itemEditor.exists && itemEditor.isHittable) { app.swipeDown() }
+        guard itemEditor.exists && itemEditor.isHittable else {
+            XCTFail("条目模板输入框应可编辑")
+            return
+        }
         itemEditor.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.8)).tap()
         itemEditor.typeText("（{kind}）")
         XCTAssertTrue(text(app, containing: "AI 答疑（玩法 content_assistant）").waitForExistence(timeout: 5))

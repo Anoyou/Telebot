@@ -101,7 +101,12 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["plugins.market.detail.current.beta"].firstMatch.waitForExistence(timeout: 15))
 
         let toStable = app.buttons["plugins.market.detail.switch.stable"]
-        XCTAssertTrue(reveal(toStable, in: app))
+        // 稳定通道在测试通道上方；切换后向下滑回该行，不能继续向列表底部找。
+        for _ in 0..<8 where !(toStable.exists && toStable.isHittable) { app.swipeDown() }
+        guard toStable.exists && toStable.isHittable else {
+            XCTFail("稳定通道的切换按钮应可点击")
+            return
+        }
         toStable.tap()
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
         XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "降级")).firstMatch.exists,

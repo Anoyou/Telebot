@@ -921,7 +921,7 @@ actor FixtureService: AppServing {
 
     func stream(path: String, onEvent: @escaping @Sendable (JSONValue) async -> Void) async throws {
         try checkConnection()
-        if liveReasoningMode, path.contains("/runs/fixture-reasoning-run/stream") {
+        if liveReasoningMode, (path.removingPercentEncoding ?? path).contains("/runs/fixture-reasoning-run/stream") {
             try await streamReasoning(onEvent: onEvent)
             return
         }
