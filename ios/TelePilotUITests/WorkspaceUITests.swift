@@ -101,10 +101,27 @@ final class WorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["plugins.market.detail.current.beta"].firstMatch.waitForExistence(timeout: 15))
 
         let toStable = app.buttons["plugins.market.detail.switch.stable"]
-        // 稳定通道在测试通道上方；切换后向下滑回该行，不能继续向列表底部找。
-        for _ in 0..<8 where !(toStable.exists && toStable.isHittable) { app.swipeDown() }
-        guard toStable.exists && toStable.isHittable else {
-            XCTFail("稳定通道的切换按钮应可点击")
+        // CI 的两次实际点击落在 y=61 的状态栏：isHittable 仍为 true，却触发了回到顶部。
+        // 必须让整个按钮位于导航栏与底栏之间，再执行通道切换。
+        func contentViewport() -> CGRect {
+            let top = app.navigationBars.firstMatch.frame.maxY + 12
+            let bottom = app.tabBars.firstMatch.exists ? app.tabBars.firstMatch.frame.minY - 12 : app.frame.maxY - 12
+            return CGRect(x: app.frame.minX, y: top, width: app.frame.width, height: max(0, bottom - top))
+        }
+        func stableSwitchIsVisible() -> Bool {
+            toStable.exists && toStable.isHittable && contentViewport().contains(toStable.frame)
+        }
+        for _ in 0..<8 {
+            if stableSwitchIsVisible() { break }
+            if toStable.exists && toStable.frame.maxY > contentViewport().maxY {
+                app.swipeUp(velocity: .slow)
+            } else {
+                app.swipeDown(velocity: .slow)
+            }
+        }
+        guard stableSwitchIsVisible(), toStable.isEnabled else {
+            let frame = toStable.exists ? toStable.frame : .zero
+            XCTFail("稳定通道按钮应完整位于内容区域且可操作：按钮 \(frame)，内容区域 \(contentViewport())")
             return
         }
         toStable.tap()
