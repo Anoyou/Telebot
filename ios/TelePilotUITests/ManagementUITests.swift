@@ -723,7 +723,19 @@ final class ManagementUITests: XCTestCase {
         reveal(toggle, in: app)
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         XCTAssertEqual(toggle.value as? String, "1")
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        // SwiftUI exposes both the full-row Toggle and its nested native switch. Tapping the
+        // accessibility container by a normalized offset did not change its value on iOS 27.
+        let rowFrame = toggle.frame
+        let nativeSwitch = app.switches.allElementsBoundByIndex.first { candidate in
+            let frame = candidate.frame
+            return candidate.exists && frame.width < 100 && abs(frame.midY - rowFrame.midY) < 5
+        }
+        guard let nativeSwitch else {
+            XCTFail("应能定位思考设置行中的原生开关控件")
+            return
+        }
+        XCTAssertTrue(nativeSwitch.isEnabled, "思考设置开关应可操作")
+        nativeSwitch.tap()
         expectation(for: NSPredicate(format: "value == %@", "0"), evaluatedWith: toggle)
         waitForExpectations(timeout: 5)
         // 滑动后 Dock 可能已缩小（.tabBarMinimizeBehavior(.onScrollDown)），只剩当前分页：往回滑让它展开再点 Agent。
